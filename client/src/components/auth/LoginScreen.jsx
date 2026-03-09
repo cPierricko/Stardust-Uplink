@@ -4,26 +4,19 @@ import { useSearchParams } from 'react-router-dom';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { API_BASE } from '../../config/constants';
 
-export default function LoginScreen({ onLogin }) {
+export default function LoginScreen({ onLogin, needsSetup: initialNeedsSetup }) {
     const [searchParams] = useSearchParams();
     const isInvite = searchParams.get('token');
     const isConfig = searchParams.get('config');
 
-    const [needsSetup, setNeedsSetup] = useState(false);
+    const [needsSetup, setNeedsSetup] = useState(initialNeedsSetup || false);
     const [setupToken, setSetupToken] = useState('');
     const [username, setUsername] = useState('admin');
     const [error, setError] = useState('');
-    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch(`${API_BASE}/auth/status`, { credentials: 'include' })
-            .then(r => r.json())
-            .then(data => {
-                setNeedsSetup(data.needsSetup);
-                setLoading(false);
-            })
-            .catch(() => setLoading(false));
-    }, []);
+        setNeedsSetup(initialNeedsSetup);
+    }, [initialNeedsSetup]);
 
     const handleLogin = async () => {
         try {
@@ -69,8 +62,6 @@ export default function LoginScreen({ onLogin }) {
             onLogin();
         } catch (err) { setError(err.message); }
     };
-
-    if (loading) return null;
 
     return (
         <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">

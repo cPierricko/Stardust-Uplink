@@ -1,11 +1,10 @@
-const express = require('express');
-const router = express.Router();
-const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
-const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
-const db = require('../db');
-const { rpName, rpID, origin } = require('../config/webauthn');
 const { jwtSecret } = require('../config/auth');
+
+// RP Configuration
+const isProd = process.env.NODE_ENV === 'production';
+const RP_ID = isProd ? 'rogue-one.cloud' : 'localhost';
+const ORIGIN = isProd ? 'https://rogue-one.cloud' : 'http://localhost:5173';
+const RP_NAME = 'Rogue One App Center';
 
 // Get Initial Setup Token Status
 router.get('/status', (req, res) => {
@@ -94,8 +93,8 @@ router.post('/generate-registration-options', async (req, res) => {
         }));
 
         const options = await generateRegistrationOptions({
-            rpName,
-            rpID,
+            rpName: RP_NAME,
+            rpID: RP_ID,
             userID: Uint8Array.from(user.id, c => c.charCodeAt(0)),
             userName: user.username,
             attestationType: 'none',
@@ -124,8 +123,8 @@ router.post('/verify-registration', async (req, res) => {
         const verification = await verifyRegistrationResponse({
             response: body,
             expectedChallenge: user.currentChallenge,
-            expectedOrigin: origin,
-            expectedRPID: rpID,
+            expectedOrigin: ORIGIN,
+            expectedRPID: RP_ID,
             requireUserVerification: false,
         });
 
@@ -156,7 +155,7 @@ router.post('/verify-registration', async (req, res) => {
 });
 
 router.get('/generate-authentication-options', async (req, res) => {
-    const options = await generateAuthenticationOptions({ rpID, userVerification: 'preferred' });
+    const options = await generateAuthenticationOptions({ rpID: RP_ID, userVerification: 'preferred' });
     global.authChallenges = global.authChallenges || {};
     global.authChallenges[options.challenge] = Date.now();
     for (const c in global.authChallenges) { if (Date.now() - global.authChallenges[c] > 300000) delete global.authChallenges[c]; }
@@ -174,8 +173,8 @@ router.post('/verify-authentication', async (req, res) => {
         const verification = await verifyAuthenticationResponse({
             response: body,
             expectedChallenge: (c) => !!global.authChallenges[c],
-            expectedOrigin: origin,
-            expectedRPID: rpID,
+            expectedOrigin: ORIGIN,
+            expectedRPID: RP_ID,
             credential: {
                 id: credential.id,
                 publicKey: Uint8Array.from(credential.public_key),
