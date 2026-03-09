@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: # Permet de lancer le déploiement manuellement depuis l'onglet Actions
 
 jobs:
   build-and-deploy:
@@ -13,7 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. Build du Frontend (Dashboard)
+      # 1. Build du Frontend React
       - name: Install & Build Client
         run: |
           cd client
@@ -21,29 +22,35 @@ jobs:
           npm run build
           cd ..
 
-      # 2. Préparation de la clé SSH
+      # 2. Préparation de la clé SSH pour le transfert
       - name: Setup SSH
         run: |
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > private_key
           chmod 600 private_key
 
-      # 3. RSYNC : Note bien le / après server pour copier le CONTENU
-      - name: Rsync to VPS
+      # 3. Transfert du Serveur (le contenu de /server vers la racine du VPS)
+      - name: Rsync Server Files
         run: |
           rsync -avz -e "ssh -i private_key -o StrictHostKeyChecking=no" \
             --exclude 'node_modules' \
             --exclude 'storage' \
             --exclude 'db.sqlite' \
+            --exclude '.git' \
             ./server/ \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}/
 
-      # 4. RESTART : On lance depuis la racine de VPS_PATH
+      # 4. Création du dossier client/dist sur le VPS et transfert du Build
+      - name: Rsync Client Build
+        run: |
+          ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p ${{ secrets.VPS_PATH }}/client/dist"
+          rsync -avz -e "ssh -i private_key -o StrictHostKeyChecking=no" \
+            ./client/dist/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}/client/dist/
+
+      # 5. Installation des dépendances et redémarrage PM2
       - name: Restart Server via SSH
         run: |
           ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd ${{ secrets.VPS_PATH }}
-            npm install --omit=dev
-            # On lance index.js qui est maintenant directement à la racine
-            pm2 restart rogue-one || pm2 start index.js --name "rogue-one"
-            pm2 save
-          EOF
+            
+            # Installation des

@@ -42,6 +42,16 @@ app.use('/apps', requireAuth, (req, res, next) => {
     next();
 }, express.static(deployRoutes.APPS_DIR));
 
+// 1. Servir les fichiers statiques (le build du client)
+// Le chemin doit pointer vers /home/deploy/stardustUplink/client/dist sur le VPS
+app.use(express.static(path.join(__dirname, 'client', 'dist')));
+
+// 2. Gestion du Fallback pour React Router
+// Si une route n'est pas une API, renvoie l'index.html du client
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
+});
+
 // Start Server
 app.listen(PORT, () => {
     console.log(`[RO_OS] Server active on port ${PORT}`);
