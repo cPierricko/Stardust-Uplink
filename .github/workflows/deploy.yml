@@ -27,25 +27,23 @@ jobs:
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > private_key
           chmod 600 private_key
 
-      # 3. Déploiement Sélectif (Rsync)
-      # On envoie le serveur et le build du client
-      # --exclude empêche d'écraser tes données vitales sur le VPS
+      # 3. RSYNC : Note bien le / après server pour copier le CONTENU
       - name: Rsync to VPS
         run: |
           rsync -avz -e "ssh -i private_key -o StrictHostKeyChecking=no" \
             --exclude 'node_modules' \
             --exclude 'storage' \
             --exclude 'db.sqlite' \
-            --exclude '.git' \
-            ./server/ ./client/dist/ \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}
+            ./server/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}/
 
-      # 4. Redémarrage du service
+      # 4. RESTART : On lance depuis la racine de VPS_PATH
       - name: Restart Server via SSH
         run: |
           ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd ${{ secrets.VPS_PATH }}
-            npm install --prefix server --production
-            pm2 restart index.js || pm2 start server/index.js --name "rogue-one"
+            npm install --omit=dev
+            # On lance index.js qui est maintenant directement à la racine
+            pm2 restart rogue-one || pm2 start index.js --name "rogue-one"
             pm2 save
           EOF
