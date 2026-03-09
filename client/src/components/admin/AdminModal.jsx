@@ -186,9 +186,6 @@ export default function AdminModal({ onClose, currentUser }) {
                     <div>
                         <h2 className="text-xl font-bold text-[#00d4ff] tracking-[0.3em] flex items-center gap-2 mb-2">
                             <Shield size={20} className="animate-pulse" /> DIAGNOSTICS & CREW
-                            <span className={`text-[10px] px-2 py-0.5 border font-mono tracking-normal ml-2 ${currentUser?.role === 'administrator' ? 'border-empire-red text-empire-red bg-empire-red/10' : 'border-[#00d4ff] text-[#00d4ff] bg-[#00d4ff]/10'}`}>
-                                [{currentUser?.role?.toUpperCase() || 'OPERATOR'}]
-                            </span>
                         </h2>
                         <div className="flex items-center gap-4">
                             <CPULoad />
