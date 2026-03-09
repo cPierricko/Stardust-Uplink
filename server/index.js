@@ -48,7 +48,7 @@ app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
 // 2. Gestion du Fallback pour React Router
 // Si une route n'est pas une API, renvoie l'index.html du client
-app.get('*', (req, res) => {
+app.get('(.*)', (req, res) => {
     res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
 });
 
