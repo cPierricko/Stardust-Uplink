@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#000000] text-gray-300 font-mono m-0 p-0 overflow-x-hidden;
+    /* Tactical HUD grid pattern and subtle radial glow */
+    background-image:
+      radial-gradient(circle at center, rgba(0, 212, 255, 0.08) 0%, transparent 60%),
+      linear-gradient(to right, rgba(0, 212, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 212, 255, 0.05) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px, 40px 40px;
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .cockpit-panel {
+    @apply bg-[#11151c]/80 border border-[#003344]/60 backdrop-blur-md relative overflow-hidden;
+    clip-path: polygon(20px 0,
+        100% 0,
+        100% calc(100% - 20px),
+        calc(100% - 20px) 100%,
+        0 100%,
+        0 20px);
+  }
+
+  .cockpit-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border: 1px solid rgba(0, 212, 255, 0.15);
+    clip-path: polygon(20px 0, 100% 0, 100% calc(100% - 20px),
+        calc(100% - 20px) 100%, 0 100%, 0 20px);
+    pointer-events: none;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/50 hover:bg-[#00d4ff]/20 hover:border-[#00d4ff] transition-all duration-300 font-bold tracking-widest uppercase;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  }
+
+  .btn-primary:hover {
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.4), 0 0 20px rgba(0, 212, 255, 0.2);
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 bg-[#ff003c]/10 text-[#ff003c] border border-[#ff003c]/50 hover:bg-[#ff003c]/20 hover:border-[#ff003c] transition-all duration-300 font-bold tracking-widest uppercase;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  }
+
+  .btn-danger:hover {
+    box-shadow: 0 0 10px rgba(255, 0, 60, 0.4), 0 0 20px rgba(255, 0, 60, 0.2);
+  }
+
+  .input-field {
+    @apply bg-black/60 border border-[#003344] text-[#00d4ff] px-3 py-2 outline-none focus:border-[#00d4ff] transition-all duration-300 w-full;
+  }
+
+  .input-field:focus {
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.4), 0 0 20px rgba(0, 212, 255, 0.2);
+  }
+
+  .shard-card {
+    @apply bg-[#11151c]/40 border border-[#003344]/50 hover:border-[#00d4ff]/80 transition-all duration-300 p-4 relative overflow-hidden flex flex-col;
+    clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
+  }
+
+  .shard-card:hover {
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.4), 0 0 20px rgba(0, 212, 255, 0.2);
+  }
+
+  /* Phase 4 - Tactical Sidebar additions */
+  .side-drawer {
+    @apply bg-[#050505]/95 backdrop-blur-xl border-l border-[#00d4ff]/20 relative;
+    clip-path: polygon(40px 0, 100% 0, 100% 100%, 0 100%, 0 40px);
+  }
+
+  .terminal-input-row {
+    @apply bg-transparent border-b border-[#003344] focus-within:border-[#00d4ff] transition-all duration-500 py-1 flex items-center gap-2;
+  }
+
+  .terminal-input {
+    @apply bg-transparent border-none outline-none text-[#00d4ff] font-mono text-xs w-full placeholder:text-[#003344] uppercase tracking-widest;
+  }
+
+  @keyframes pulseLine {
+
+    0%,
+    100% {
+      opacity: 0.3;
+    }
+
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .terminal-input-row {
+    position: relative;
+  }
+
+  .terminal-input-row::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    height: 1px;
+    background-color: #00d4ff;
+    width: 100%;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.5s;
+    pointer-events: none;
+  }
+
+  .terminal-input-row:focus-within::after {
+    transform: scaleX(1);
+    animation: pulseLine 2s infinite ease-in-out;
+  }
+}
