@@ -1,0 +1,51 @@
+name: Deploy Rogue One OS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1. Build du Frontend (Dashboard)
+      - name: Install & Build Client
+        run: |
+          cd client
+          npm install
+          npm run build
+          cd ..
+
+      # 2. Préparation de la clé SSH
+      - name: Setup SSH
+        run: |
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > private_key
+          chmod 600 private_key
+
+      # 3. Déploiement Sélectif (Rsync)
+      # On envoie le serveur et le build du client
+      # --exclude empêche d'écraser tes données vitales sur le VPS
+      - name: Rsync to VPS
+        run: |
+          rsync -avz -e "ssh -i private_key -o StrictHostKeyChecking=no" \
+            --exclude 'node_modules' \
+            --exclude 'storage' \
+            --exclude 'db.sqlite' \
+            --exclude '.git' \
+            ./server/ ./client/dist/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}
+
+      # 4. Redémarrage du service
+      - name: Restart Server via SSH
+        run: |
+          ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            cd ${{ secrets.VPS_PATH }}
+            npm install --prefix server --production
+            pm2 restart index.js || pm2 start server/index.js --name "rogue-one"
+            pm2 save
+          EOF
