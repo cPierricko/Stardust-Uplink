@@ -1,3 +1,9 @@
+const express = require('express');
+const router = express.Router();
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
+const db = require('../db');
 const { jwtSecret } = require('../config/auth');
 
 // RP Configuration
