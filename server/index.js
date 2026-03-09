@@ -225,9 +225,9 @@ app.post('/api/auth/verify-registration', async (req, res) => {
         });
 
         if (verification.verified && verification.registrationInfo) {
-            const { credentialPublicKey, credentialID, counter } = verification.registrationInfo;
+            const { credential } = verification.registrationInfo;
             const stmtIns = db.prepare('INSERT INTO credentials (id, user_id, public_key, counter, transports) VALUES (?, ?, ?, ?, ?)');
-            stmtIns.run(Buffer.from(credentialID).toString('base64url'), user.id, Buffer.from(credentialPublicKey), counter, body.response.transports ? JSON.stringify(body.response.transports) : '[]');
+            stmtIns.run(credential.id, user.id, Buffer.from(credential.publicKey), credential.counter, credential.transports ? JSON.stringify(credential.transports) : '[]');
 
             const stmtUpd = db.prepare('UPDATE users SET currentChallenge = NULL, setupToken = NULL WHERE id = ?');
             stmtUpd.run(user.id);
@@ -239,6 +239,7 @@ app.post('/api/auth/verify-registration', async (req, res) => {
             res.status(400).json({ error: 'Verification failed' });
         }
     } catch (error) {
+        console.error('[Verify_Reg Error]', error);
         res.status(400).json({ error: error.message });
     }
 });
@@ -265,9 +266,9 @@ app.post('/api/auth/verify-authentication', async (req, res) => {
             expectedChallenge: (c) => !!global.authChallenges[c],
             expectedOrigin: origin,
             expectedRPID: rpID,
-            authenticator: {
-                credentialID: Uint8Array.from(Buffer.from(credential.id, 'base64url')),
-                credentialPublicKey: Uint8Array.from(credential.public_key),
+            credential: {
+                id: credential.id,
+                publicKey: Uint8Array.from(credential.public_key),
                 counter: credential.counter,
                 transports: JSON.parse(credential.transports),
             },
@@ -284,6 +285,7 @@ app.post('/api/auth/verify-authentication', async (req, res) => {
             res.status(400).json({ error: 'Verification failed' });
         }
     } catch (error) {
+        console.error('[Verify_Auth Error]', error);
         res.status(400).json({ error: error.message });
     }
 });
