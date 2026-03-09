@@ -56,7 +56,7 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => window.location.reload()} />;
+    return <LoginScreen needsSetup={needsSetup} onLogin={() => window.location.reload()} />;
   }
 
   return (
