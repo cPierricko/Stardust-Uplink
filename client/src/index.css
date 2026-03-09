@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-space-black text-gray-300 font-mono m-0 p-0 overflow-x-hidden;
+    /* Tactical HUD scanlines and subtle radial glow */
+    background-image: 
+      radial-gradient(circle at center, rgba(0, 212, 255, 0.05) 0%, transparent 60%),
+      repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.15),
+        rgba(0, 0, 0, 0.15) 1px,
+        transparent 1px,
+        transparent 3px
+      );
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .cockpit-panel {
+    @apply bg-hud-gray/40 border border-hud-gray/60 backdrop-blur-sm relative;
+    /* Star Wars style beveled/angled corners */
+    clip-path: polygon(
+      15px 0, 
+      100% 0, 
+      100% calc(100% - 15px), 
+      calc(100% - 15px) 100%, 
+      0 100%, 
+      0 15px
+    );
+  }
+
+  .cockpit-panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    clip-path: polygon(
+      15px 0, 100% 0, 100% calc(100% - 15px), 
+      calc(100% - 15px) 100%, 0 100%, 0 15px
+    );
+    pointer-events: none;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-rebel-blue/10 text-rebel-blue border border-rebel-blue/50 hover:bg-rebel-blue/20 hover:shadow-neon-blue transition-all duration-300 font-bold tracking-wider;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  }
+  
+  .btn-danger {
+    @apply px-4 py-2 bg-empire-red/10 text-empire-red border border-empire-red/50 hover:bg-empire-red/20 hover:shadow-neon-red transition-all duration-300 font-bold tracking-wider;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  }
+
+  .input-field {
+    @apply bg-black/50 border border-hud-gray/80 text-rebel-blue px-3 py-2 outline-none focus:border-rebel-blue focus:shadow-neon-blue transition-all duration-300 w-full;
+  }
+}
