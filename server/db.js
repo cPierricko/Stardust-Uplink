@@ -14,8 +14,10 @@ db.exec(`
     id TEXT PRIMARY KEY,
     username TEXT UNIQUE,
     currentChallenge TEXT,
-    setupToken TEXT
+    setupToken TEXT,
+    role TEXT DEFAULT 'operator'
   );
+
 
   CREATE TABLE IF NOT EXISTS credentials (
     id TEXT PRIMARY KEY,
@@ -42,9 +44,17 @@ db.exec(`
 // Add columns if they don't exist
 try {
   db.exec('ALTER TABLE users ADD COLUMN setupToken TEXT');
-} catch (e) {
-  // Ignore if column already exists
-}
+} catch (e) { }
+
+try {
+  db.exec('ALTER TABLE users ADD COLUMN role TEXT DEFAULT "operator"');
+} catch (e) { }
+
+try {
+  db.exec('ALTER TABLE users ADD COLUMN setupTokenExpiresAt INTEGER');
+} catch (e) { }
+
+
 
 // First-Boot Logic
 function runFirstBootCheck() {

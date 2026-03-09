@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -44,15 +45,19 @@ app.use('/apps', (req, res, next) => {
 
 // === MIDDLEWARE: Deploy Token Check ===
 const requireDeployToken = (req, res, next) => {
-    const token = req.headers['x-deploy-token'] || req.query.token;
+    const token = req.headers['x-deploy-token'] || req.query.config || req.query.token;
     if (!token) return res.status(401).json({ error: 'Deploy token required' });
+
 
     const stmt = db.prepare('SELECT id FROM deploy_tokens WHERE token = ?');
     const tokenRecord = stmt.get(token);
 
-    if (!tokenRecord) return res.status(403).json({ error: 'Invalid deploy token' });
+    if (!tokenRecord) return res.status(404).json({ error: 'Invalid or expired deploy token' });
+    req.deployTokenId = tokenRecord.id; // Store ID to delete later
     next();
 };
+
+
 
 // === MIDDLEWARE: Auth Check ===
 const requireAuth = (req, res, next) => {
@@ -119,7 +124,14 @@ app.post('/api/deploy/:appName', requireDeployToken, upload.single('bundle'), (r
         const stmt = db.prepare('INSERT OR IGNORE INTO apps (id, name, path) VALUES (?, ?, ?)');
         stmt.run(crypto.randomUUID(), appName, `/apps/${appName}`);
 
+        // Burn deploy token after success
+        if (req.deployTokenId) {
+            db.prepare('DELETE FROM deploy_tokens WHERE id = ?').run(req.deployTokenId);
+            console.log(`[Deploy] Burned token ID ${req.deployTokenId}`);
+        }
+
         res.json({ success: true, message: `App ${appName} deployed successfully` });
+
 
     } catch (err) {
         console.error(`[Deploy] Error deploying ${appName}:`, err);
@@ -139,22 +151,50 @@ app.post('/api/deploy/:appName', requireDeployToken, upload.single('bundle'), (r
 app.get('/api/auth/status', (req, res) => {
     const stmt = db.prepare('SELECT COUNT(*) as count FROM users');
     const userCountRow = stmt.get();
-    res.json({ isFirstBoot: userCountRow.count === 0 });
+    const isFirstBoot = userCountRow.count === 0;
+
+    const token = req.cookies.jwt;
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            return res.json({ isFirstBoot, isAuthenticated: true, user: { id: decoded.id, username: decoded.username, role: decoded.role } });
+        } catch (err) {
+            // Token invalid or expired, proceed with unauthenticated status
+        }
+    }
+    res.json({ isFirstBoot, isAuthenticated: false, user: null });
 });
+
+
 
 // Setup Info - Check if token is valid
 app.get('/api/auth/setup-info', (req, res) => {
     const { token } = req.query;
     const initToken = process.env.INITIAL_SETUP_TOKEN;
 
+    // Check if it's the root setup token
     if (initToken && token && token.trim() === initToken.trim()) {
-        return res.json({ valid: true, isInitial: true, username: 'Admin' });
+        const stmtCount = db.prepare('SELECT COUNT(*) as count FROM users');
+        if (stmtCount.get().count === 0) {
+            return res.json({ username: 'root_admin', isInitial: true });
+        }
     }
-    const stmt = db.prepare('SELECT id, username FROM users WHERE setupToken = ?');
+
+    const stmt = db.prepare('SELECT username, setupTokenExpiresAt FROM users WHERE setupToken = ?');
     const user = stmt.get(token);
-    if (user) return res.json({ valid: true, isInitial: false, username: user.username });
-    return res.status(403).json({ error: 'Invalid token' });
+
+    if (!user) return res.status(404).json({ error: 'Invalid or expired enrollment token' });
+
+    // Check expiration
+    if (user.setupTokenExpiresAt && user.setupTokenExpiresAt < Date.now()) {
+        db.prepare('UPDATE users SET setupToken = NULL, setupTokenExpiresAt = NULL WHERE setupToken = ?').run(token);
+        return res.status(404).json({ error: 'Enrollment token has expired (5min limit)' });
+    }
+
+    res.json({ username: user.username });
 });
+
+
 
 // Relying Party Configuration
 const rpName = 'Rogue One App Center';
@@ -169,18 +209,37 @@ app.post('/api/auth/generate-registration-options', async (req, res) => {
 
         if (initToken && setupToken && setupToken.trim() === initToken.trim()) {
             const userId = crypto.randomUUID();
-            user = { id: userId, username: username || 'admin' };
+            user = { id: userId, username: username || 'admin', role: 'administrator' };
             const stmtCount = db.prepare('SELECT COUNT(*) as count FROM users');
             if (stmtCount.get().count > 0) return res.status(400).json({ error: 'Setup already completed' });
 
-            const stmtIns = db.prepare('INSERT INTO users (id, username) VALUES (?, ?)');
-            stmtIns.run(user.id, user.username);
+            const stmtIns = db.prepare('INSERT INTO users (id, username, role) VALUES (?, ?, ?)');
+            stmtIns.run(user.id, user.username, user.role);
             process.env.INITIAL_SETUP_TOKEN = null;
+
         } else {
-            const stmt = db.prepare('SELECT id, username FROM users WHERE setupToken = ?');
+            const stmt = db.prepare('SELECT id, username, setupTokenExpiresAt FROM users WHERE setupToken = ?');
             user = stmt.get(setupToken);
-            if (!user) return res.status(403).json({ error: 'Invalid setup token' });
+            if (!user) return res.status(404).json({ error: 'Invalid or expired setup token' });
+
+            if (user.setupTokenExpiresAt && user.setupTokenExpiresAt < Date.now()) {
+                db.prepare('UPDATE users SET setupToken = NULL, setupTokenExpiresAt = NULL WHERE id = ?').run(user.id);
+                return res.status(403).json({ error: 'Setup token expired (5min limit)' });
+            }
+
+            // If user has no username yet, save the one provided during registration
+            if (!user.username && username) {
+
+                const checkStmt = db.prepare('SELECT id FROM users WHERE username = ?');
+                if (checkStmt.get(username)) return res.status(400).json({ error: 'Username already taken' });
+
+                db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, user.id);
+                user.username = username;
+            } else if (!user.username && !username) {
+                return res.status(400).json({ error: 'Username required for registration' });
+            }
         }
+
 
         const stmtCreds = db.prepare('SELECT id FROM credentials WHERE user_id = ?');
         const userCredentials = stmtCreds.all(user.id).map(c => ({
@@ -232,9 +291,12 @@ app.post('/api/auth/verify-registration', async (req, res) => {
             const stmtUpd = db.prepare('UPDATE users SET currentChallenge = NULL, setupToken = NULL WHERE id = ?');
             stmtUpd.run(user.id);
 
-            const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+            // Fetch user again to get role
+            const finalUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+            const token = jwt.sign({ id: finalUser.id, username: finalUser.username, role: finalUser.role }, JWT_SECRET, { expiresIn: '7d' });
             res.cookie('jwt', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
             res.json({ verified: true });
+
         } else {
             res.status(400).json({ error: 'Verification failed' });
         }
@@ -299,17 +361,33 @@ app.get('/api/admin/users', requireAuth, (req, res) => {
 app.post('/api/admin/users', requireAuth, (req, res) => {
     const { username } = req.body;
     const userId = crypto.randomUUID();
-    const setupToken = crypto.randomBytes(16).toString('hex');
-    const stmt = db.prepare('INSERT INTO users (id, username, setupToken) VALUES (?, ?, ?)');
-    stmt.run(userId, username, setupToken);
-    res.json({ id: userId, username, setupToken });
+    const setupToken = crypto.randomBytes(32).toString('hex'); // 64 chars matching First Boot
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes TTL
+
+    const stmt = db.prepare('INSERT INTO users (id, username, setupToken, setupTokenExpiresAt, role) VALUES (?, ?, ?, ?, ?)');
+    stmt.run(userId, username || null, setupToken, expiresAt, 'operator');
+
+    res.json({ id: userId, username: username || null, setupToken, setupTokenExpiresAt: expiresAt });
 });
+
+
+
 
 app.delete('/api/admin/users/:id', requireAuth, (req, res) => {
     db.prepare('DELETE FROM credentials WHERE user_id = ?').run(req.params.id);
     db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
     res.json({ success: true });
 });
+
+app.patch('/api/admin/users/:id', requireAuth, (req, res) => {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: 'Username required' });
+    const stmt = db.prepare('UPDATE users SET username = ? WHERE id = ?');
+    const info = stmt.run(username, req.params.id);
+    if (info.changes === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true });
+});
+
 
 app.get('/api/admin/tokens', requireAuth, (req, res) => {
     const stmt = db.prepare('SELECT id, token, created_at FROM deploy_tokens');
