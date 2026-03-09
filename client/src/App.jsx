@@ -27,7 +27,7 @@ function AppContent() {
   const deployConfigToken = searchParams.get('config');
 
 
-  const [isFirstBoot, setIsFirstBoot] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,31 +38,21 @@ function AppContent() {
     fetch(`${API_BASE}/auth/status`, { credentials: 'include' })
       .then(r => r.json())
       .then(data => {
-        setIsFirstBoot(data.isFirstBoot);
+        setNeedsSetup(data.needsSetup);
         if (data.isAuthenticated) {
           setIsAuthenticated(true);
           setUser(data.user);
-          setLoading(false);
-        } else if (!data.isFirstBoot && !invitationToken && !deployConfigToken) {
-          setLoading(false);
-        } else {
-          setLoading(false);
         }
+        setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [invitationToken, deployConfigToken]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-[#00d4ff] text-xl tracking-widest animate-pulse">INITIALIZING STARDUST LINK...</div>;
 
-  // Enrollment flow (Invitation or First Boot)
+  // Enrollment flow (Invitation)
   if (invitationToken) {
     return <SetupScreen setupToken={invitationToken} onComplete={() => window.location.href = '/'} />;
-  }
-
-
-
-  if (isFirstBoot) {
-    return <FirstBootScreen onComplete={() => window.location.href = '/'} />;
   }
 
   if (!isAuthenticated) {

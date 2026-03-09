@@ -11,18 +11,18 @@ const { jwtSecret } = require('../config/auth');
 router.get('/status', (req, res) => {
     const stmt = db.prepare('SELECT COUNT(*) as count FROM users');
     const userCountRow = stmt.get();
-    const isFirstBoot = userCountRow.count === 0;
+    const needsSetup = userCountRow.count === 0;
 
     const token = req.cookies.jwt;
     if (token) {
         try {
             const decoded = jwt.verify(token, jwtSecret);
-            return res.json({ isFirstBoot, isAuthenticated: true, user: { id: decoded.id, username: decoded.username, role: decoded.role } });
+            return res.json({ needsSetup, isAuthenticated: true, user: { id: decoded.id, username: decoded.username, role: decoded.role } });
         } catch (err) {
             // Token invalid or expired, proceed with unauthenticated status
         }
     }
-    res.json({ isFirstBoot, isAuthenticated: false, user: null });
+    res.json({ needsSetup, isAuthenticated: false, user: null });
 });
 
 // Setup Info - Check if token is valid
