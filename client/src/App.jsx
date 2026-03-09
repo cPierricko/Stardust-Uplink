@@ -76,12 +76,15 @@ function AppContent() {
 
 
       <main className="w-full max-w-6xl flex flex-col gap-6 flex-1">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }}
-          className="lg:col-span-12"
-        >
-          <DeploymentModule initialToken={deployConfigToken} />
-        </motion.div>
+        {user?.role === 'administrator' && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }}
+            className="lg:col-span-12"
+          >
+            <DeploymentModule initialToken={deployConfigToken} />
+          </motion.div>
+        )}
+
 
 
 

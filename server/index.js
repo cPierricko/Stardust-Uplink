@@ -73,6 +73,14 @@ const requireAuth = (req, res, next) => {
     }
 };
 
+const requireAdmin = (req, res, next) => {
+    if (!req.user || req.user.role !== 'administrator') {
+        return res.status(403).json({ error: 'Administrative access required' });
+    }
+    next();
+};
+
+
 
 // === ROUTES: Deployment Engine ===
 app.post('/api/deploy/:appName', requireDeployToken, upload.single('bundle'), (req, res) => {
@@ -317,7 +325,7 @@ app.get('/api/auth/generate-authentication-options', async (req, res) => {
 
 app.post('/api/auth/verify-authentication', async (req, res) => {
     const { body } = req.body;
-    const stmt = db.prepare('SELECT c.*, u.username FROM credentials c JOIN users u ON c.user_id = u.id WHERE c.id = ?');
+    const stmt = db.prepare('SELECT c.*, u.username, u.role FROM credentials c JOIN users u ON c.user_id = u.id WHERE c.id = ?');
     const credential = stmt.get(body.id);
 
     if (!credential) return res.status(400).json({ error: 'Unrecognized credential' });
@@ -340,7 +348,7 @@ app.post('/api/auth/verify-authentication', async (req, res) => {
             const stmtUpd = db.prepare('UPDATE credentials SET counter = ? WHERE id = ?');
             stmtUpd.run(verification.authenticationInfo.newCounter, credential.id);
 
-            const token = jwt.sign({ id: credential.user_id, username: credential.username }, JWT_SECRET, { expiresIn: '7d' });
+            const token = jwt.sign({ id: credential.user_id, username: credential.username, role: credential.role }, JWT_SECRET, { expiresIn: '7d' });
             res.cookie('jwt', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
             res.json({ verified: true });
         } else {
@@ -353,12 +361,12 @@ app.post('/api/auth/verify-authentication', async (req, res) => {
 });
 
 // === ROUTES: Admin API ===
-app.get('/api/admin/users', requireAuth, (req, res) => {
-    const stmt = db.prepare('SELECT id, username, setupToken FROM users');
+app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
+    const stmt = db.prepare('SELECT id, username, setupToken, role FROM users');
     res.json(stmt.all());
 });
 
-app.post('/api/admin/users', requireAuth, (req, res) => {
+app.post('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
     const { username } = req.body;
     const userId = crypto.randomUUID();
     const setupToken = crypto.randomBytes(32).toString('hex'); // 64 chars matching First Boot
@@ -373,13 +381,13 @@ app.post('/api/admin/users', requireAuth, (req, res) => {
 
 
 
-app.delete('/api/admin/users/:id', requireAuth, (req, res) => {
+app.delete('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
     db.prepare('DELETE FROM credentials WHERE user_id = ?').run(req.params.id);
     db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
     res.json({ success: true });
 });
 
-app.patch('/api/admin/users/:id', requireAuth, (req, res) => {
+app.patch('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
     const { username } = req.body;
     if (!username) return res.status(400).json({ error: 'Username required' });
     const stmt = db.prepare('UPDATE users SET username = ? WHERE id = ?');
@@ -389,12 +397,12 @@ app.patch('/api/admin/users/:id', requireAuth, (req, res) => {
 });
 
 
-app.get('/api/admin/tokens', requireAuth, (req, res) => {
+app.get('/api/admin/tokens', requireAuth, requireAdmin, (req, res) => {
     const stmt = db.prepare('SELECT id, token, created_at FROM deploy_tokens');
     res.json(stmt.all());
 });
 
-app.post('/api/admin/tokens', requireAuth, (req, res) => {
+app.post('/api/admin/tokens', requireAuth, requireAdmin, (req, res) => {
     const tokenId = crypto.randomUUID();
     const rawToken = crypto.randomBytes(32).toString('hex');
     const stmt = db.prepare('INSERT INTO deploy_tokens (id, token) VALUES (?, ?)');
@@ -402,10 +410,11 @@ app.post('/api/admin/tokens', requireAuth, (req, res) => {
     res.json({ id: tokenId, token: rawToken });
 });
 
-app.delete('/api/admin/tokens/:id', requireAuth, (req, res) => {
+app.delete('/api/admin/tokens/:id', requireAuth, requireAdmin, (req, res) => {
     db.prepare('DELETE FROM deploy_tokens WHERE id = ?').run(req.params.id);
     res.json({ success: true });
 });
+
 
 // Logout
 app.post('/api/auth/logout', (req, res) => {

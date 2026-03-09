@@ -23,13 +23,18 @@ export default function Header({ user, onAdminOpen }) {
 
             <div className="flex items-center gap-6">
                 <div className="flex flex-col text-right">
-                    <span className="text-xs text-[#00d4ff] font-bold tracking-widest uppercase">{role}: {username}</span>
+                    <span className={`text-xs font-bold tracking-widest uppercase ${user?.role === 'administrator' ? 'text-empire-red drop-shadow-[0_0_8px_rgba(255,49,49,0.5)]' : 'text-[#00d4ff]'}`}>
+                        {role}: {username}
+                    </span>
                 </div>
 
                 <div className="flex gap-2">
-                    <button onClick={onAdminOpen} className="btn-primary p-2 flex items-center justify-center hover:bg-[#00d4ff]/20" title="Admin Settings">
-                        <Settings size={18} />
-                    </button>
+                    {user?.role === 'administrator' && (
+                        <button onClick={onAdminOpen} className="btn-primary p-2 flex items-center justify-center hover:bg-[#00d4ff]/20" title="Admin Settings">
+                            <Settings size={18} />
+                        </button>
+                    )}
+
                     <button onClick={() => {
                         fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).then(() => window.location.reload());
                     }} className="btn-danger p-2 flex items-center justify-center hover:bg-empire-red/20">
