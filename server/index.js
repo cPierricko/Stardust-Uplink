@@ -47,10 +47,18 @@ app.use('/apps', requireAuth, (req, res, next) => {
 app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
 // 2. Gestion du Fallback pour React Router
-// Si une route n'est pas une API, renvoie l'index.html du client
-// Remplace app.get('(.*)', ... ou app.get('*', ... par :
-app.get('/*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
+app.use((req, res, next) => {
+    // Si c'est une requête API qui arrive ici, on renvoie une 404 JSON
+    if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'API Endpoint not found' });
+    }
+    // Pour tout le reste, on envoie le fichier index.html
+    res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'), (err) => {
+        if (err) {
+            // Si le fichier n'existe pas du tout (problème de chemin)
+            res.status(500).send("Erreur : Interface non trouvée sur le serveur.");
+        }
+    });
 });
 
 // Start Server
