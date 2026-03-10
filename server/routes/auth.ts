@@ -1,49 +1,76 @@
-const express = require('express');
+import express, { Request, Response } from 'express';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import {
+    generateRegistrationOptions,
+    verifyRegistrationResponse,
+    generateAuthenticationOptions,
+    verifyAuthenticationResponse,
+    VerifiedRegistrationResponse,
+    VerifiedAuthenticationResponse
+} from '@simplewebauthn/server';
+import db from '../db.js';
+import { jwtSecret } from '../config/auth.js';
+import { User, AuthStatus } from '../../shared/types.js';
+
 const router = express.Router();
-const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
-const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
-const db = require('../db');
-const { jwtSecret } = require('../config/auth');
 
 // RP Configuration
-const isProd = process.env.NODE_ENV === 'production';
+const isProd = process.env['NODE_ENV'] === 'production';
 const RP_ID = isProd ? 'rogue-one.cloud' : 'localhost';
 const ORIGIN = isProd ? 'https://rogue-one.cloud' : 'http://localhost:5173';
 const RP_NAME = 'Rogue One App Center';
 
+// Store for authentication challenges (in-memory for simple implementation)
+const authChallenges: Record<string, number> = {};
+
+// Clean up old challenges
+setInterval(() => {
+    const now = Date.now();
+    for (const challenge in authChallenges) {
+        if (now - (authChallenges[challenge] || 0) > 300000) {
+            delete authChallenges[challenge];
+        }
+    }
+}, 60000);
+
 // Get Initial Setup Token Status
-router.get('/status', (req, res) => {
+router.get('/status', (req: Request, res: Response) => {
     const stmt = db.prepare('SELECT COUNT(*) as count FROM users');
-    const userCountRow = stmt.get();
+    const userCountRow = stmt.get() as { count: number };
     const needsSetup = userCountRow.count === 0;
 
     const token = req.cookies.jwt;
     if (token) {
         try {
-            const decoded = jwt.verify(token, jwtSecret);
-            return res.json({ needsSetup, isAuthenticated: true, user: { id: decoded.id, username: decoded.username, role: decoded.role } });
+            const decoded = jwt.verify(token, jwtSecret) as { id: string; username: string; role: string };
+            return res.json({
+                needsSetup,
+                isAuthenticated: true,
+                user: { id: decoded.id, username: decoded.username, role: decoded.role }
+            });
         } catch (err) {
-            // Token invalid or expired, proceed with unauthenticated status
+            // Token invalid or expired
         }
     }
     res.json({ needsSetup, isAuthenticated: false, user: null });
 });
 
-// Setup Info - Check if token is valid
-router.get('/setup-info', (req, res) => {
-    const { token } = req.query;
-    const initToken = process.env.INITIAL_SETUP_TOKEN;
+// Setup Info
+router.get('/setup-info', (req: Request, res: Response) => {
+    const { token } = req.query as { token?: string };
+    const initToken = process.env['INITIAL_SETUP_TOKEN'];
 
     if (initToken && token && token.trim() === initToken.trim()) {
         const stmtCount = db.prepare('SELECT COUNT(*) as count FROM users');
-        if (stmtCount.get().count === 0) {
+        const countRow = stmtCount.get() as { count: number };
+        if (countRow.count === 0) {
             return res.json({ username: 'root_admin', isInitial: true });
         }
     }
 
     const stmt = db.prepare('SELECT username, setupTokenExpiresAt FROM users WHERE setupToken = ?');
-    const user = stmt.get(token);
+    const user = stmt.get(token) as { username: string; setupTokenExpiresAt: number | null } | undefined;
 
     if (!user) return res.status(404).json({ error: 'Invalid or expired enrollment token' });
 
@@ -55,47 +82,50 @@ router.get('/setup-info', (req, res) => {
     res.json({ username: user.username });
 });
 
-router.post('/generate-registration-options', async (req, res) => {
+router.post('/generate-registration-options', async (req: Request, res: Response) => {
     try {
         const { setupToken, username } = req.body;
-        let user;
-        const initToken = process.env.INITIAL_SETUP_TOKEN;
+        let user: { id: string; username: string; role: string } | undefined;
+        const initToken = process.env['INITIAL_SETUP_TOKEN'];
 
         if (initToken && setupToken && setupToken.trim() === initToken.trim()) {
             const userId = crypto.randomUUID();
             user = { id: userId, username: username || 'admin', role: 'administrator' };
             const stmtCount = db.prepare('SELECT COUNT(*) as count FROM users');
-            if (stmtCount.get().count > 0) return res.status(400).json({ error: 'Setup already completed' });
+            const countRow = stmtCount.get() as { count: number };
+            if (countRow.count > 0) return res.status(400).json({ error: 'Setup already completed' });
 
             const stmtIns = db.prepare('INSERT INTO users (id, username, role) VALUES (?, ?, ?)');
             stmtIns.run(user.id, user.username, user.role);
-            process.env.INITIAL_SETUP_TOKEN = null;
+            delete process.env['INITIAL_SETUP_TOKEN'];
 
         } else {
             const stmt = db.prepare('SELECT id, username, setupTokenExpiresAt FROM users WHERE setupToken = ?');
-            user = stmt.get(setupToken);
-            if (!user) return res.status(404).json({ error: 'Invalid or expired setup token' });
+            const existingUser = stmt.get(setupToken) as { id: string; username: string | null; setupTokenExpiresAt: number | null } | undefined;
+            if (!existingUser) return res.status(404).json({ error: 'Invalid or expired setup token' });
 
-            if (user.setupTokenExpiresAt && user.setupTokenExpiresAt < Date.now()) {
-                db.prepare('UPDATE users SET setupToken = NULL, setupTokenExpiresAt = NULL WHERE id = ?').run(user.id);
+            if (existingUser.setupTokenExpiresAt && existingUser.setupTokenExpiresAt < Date.now()) {
+                db.prepare('UPDATE users SET setupToken = NULL, setupTokenExpiresAt = NULL WHERE id = ?').run(existingUser.id);
                 return res.status(403).json({ error: 'Setup token expired (5min limit)' });
             }
 
-            if (!user.username && username) {
+            if (!existingUser.username && username) {
                 const checkStmt = db.prepare('SELECT id FROM users WHERE username = ?');
                 if (checkStmt.get(username)) return res.status(400).json({ error: 'Username already taken' });
 
-                db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, user.id);
-                user.username = username;
-            } else if (!user.username && !username) {
+                db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, existingUser.id);
+                user = { id: existingUser.id, username, role: 'operator' };
+            } else if (!existingUser.username && !username) {
                 return res.status(400).json({ error: 'Username required for registration' });
+            } else {
+                user = { id: existingUser.id, username: existingUser.username!, role: 'operator' };
             }
         }
 
         const stmtCreds = db.prepare('SELECT id FROM credentials WHERE user_id = ?');
-        const userCredentials = stmtCreds.all(user.id).map(c => ({
-            id: Uint8Array.from(Buffer.from(c.id, 'base64url')),
-            type: 'public-key',
+        const userCredentials = (stmtCreds.all(user.id) as { id: string }[]).map(c => ({
+            id: c.id,
+            type: 'public-key' as const,
         }));
 
         const options = await generateRegistrationOptions({
@@ -112,21 +142,21 @@ router.post('/generate-registration-options', async (req, res) => {
         stmtUpd.run(options.challenge, user.id);
 
         res.json({ options, userId: user.id });
-    } catch (err) {
+    } catch (err: any) {
         console.error('[WebAuthn Error]', err);
         res.status(500).json({ error: err.message });
     }
 });
 
-router.post('/verify-registration', async (req, res) => {
+router.post('/verify-registration', async (req: Request, res: Response) => {
     const { userId, body } = req.body;
     const stmt = db.prepare('SELECT * FROM users WHERE id = ?');
-    const user = stmt.get(userId);
+    const user = stmt.get(userId) as { id: string; currentChallenge: string | null; username: string; role: string } | undefined;
 
     if (!user || !user.currentChallenge) return res.status(400).json({ error: 'Configuration Error' });
 
     try {
-        const verification = await verifyRegistrationResponse({
+        const verification: VerifiedRegistrationResponse = await verifyRegistrationResponse({
             response: body,
             expectedChallenge: user.currentChallenge,
             expectedOrigin: ORIGIN,
@@ -135,57 +165,54 @@ router.post('/verify-registration', async (req, res) => {
         });
 
         if (verification.verified && verification.registrationInfo) {
-            const { credential } = verification.registrationInfo;
+            const { id, publicKey, counter } = verification.registrationInfo.credential;
             const stmtIns = db.prepare('INSERT INTO credentials (id, user_id, public_key, counter, transports) VALUES (?, ?, ?, ?, ?)');
-            stmtIns.run(credential.id, user.id, Buffer.from(credential.publicKey), credential.counter, credential.transports ? JSON.stringify(credential.transports) : '[]');
+            stmtIns.run(id, user.id, Buffer.from(publicKey), counter, JSON.stringify(body.response.transports || []));
 
             const stmtUpd = db.prepare('UPDATE users SET currentChallenge = NULL, setupToken = NULL WHERE id = ?');
             stmtUpd.run(user.id);
 
-            const finalUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-            const token = jwt.sign({ id: finalUser.id, username: finalUser.username, role: finalUser.role }, jwtSecret, { expiresIn: '7d' });
+            const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, jwtSecret, { expiresIn: '7d' });
             res.cookie('jwt', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'Strict'
+                secure: process.env['NODE_ENV'] === 'production',
+                sameSite: 'strict'
             });
             res.json({ verified: true });
 
         } else {
             res.status(400).json({ error: 'Verification failed' });
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error('[Verify_Reg Error]', error);
         res.status(400).json({ error: error.message });
     }
 });
 
-router.get('/generate-authentication-options', async (req, res) => {
+router.get('/generate-authentication-options', async (req: Request, res: Response) => {
     const options = await generateAuthenticationOptions({ rpID: RP_ID, userVerification: 'preferred' });
-    global.authChallenges = global.authChallenges || {};
-    global.authChallenges[options.challenge] = Date.now();
-    for (const c in global.authChallenges) { if (Date.now() - global.authChallenges[c] > 300000) delete global.authChallenges[c]; }
+    authChallenges[options.challenge] = Date.now();
     res.json(options);
 });
 
-router.post('/verify-authentication', async (req, res) => {
+router.post('/verify-authentication', async (req: Request, res: Response) => {
     const { body } = req.body;
     const stmt = db.prepare('SELECT c.*, u.username, u.role FROM credentials c JOIN users u ON c.user_id = u.id WHERE c.id = ?');
-    const credential = stmt.get(body.id);
+    const credential = stmt.get(body.id) as { id: string; user_id: string; public_key: Buffer; counter: number; transports: string; username: string; role: string } | undefined;
 
     if (!credential) return res.status(400).json({ error: 'Unrecognized credential' });
 
     try {
-        const verification = await verifyAuthenticationResponse({
+        const verification: VerifiedAuthenticationResponse = await verifyAuthenticationResponse({
             response: body,
-            expectedChallenge: (c) => !!global.authChallenges[c],
+            expectedChallenge: (challenge) => !!authChallenges[challenge],
             expectedOrigin: ORIGIN,
             expectedRPID: RP_ID,
             credential: {
                 id: credential.id,
-                publicKey: Uint8Array.from(credential.public_key),
+                publicKey: new Uint8Array(credential.public_key),
                 counter: credential.counter,
-                transports: JSON.parse(credential.transports),
+                transports: JSON.parse(credential.transports) as AuthenticatorTransport[],
             },
         });
 
@@ -196,22 +223,22 @@ router.post('/verify-authentication', async (req, res) => {
             const token = jwt.sign({ id: credential.user_id, username: credential.username, role: credential.role }, jwtSecret, { expiresIn: '7d' });
             res.cookie('jwt', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'Strict'
+                secure: process.env['NODE_ENV'] === 'production',
+                sameSite: 'strict'
             });
             res.json({ verified: true });
         } else {
             res.status(400).json({ error: 'Verification failed' });
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error('[Verify_Auth Error]', error);
         res.status(400).json({ error: error.message });
     }
 });
 
-router.post('/logout', (req, res) => {
+router.post('/logout', (req: Request, res: Response) => {
     res.clearCookie('jwt');
     res.json({ success: true });
 });
 
-module.exports = router;
+export default router;

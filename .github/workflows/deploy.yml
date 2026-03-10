@@ -14,12 +14,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. Build du Frontend React
-      - name: Install & Build Client
+      # 1. Build & Test Client
+      - name: Install, Type-check & Build Client
         run: |
           cd client
           npm install
+          npm run type-check
           npm run build
+          cd ..
+
+      # 2. Type-check & Test Server
+      - name: Install, Type-check & Test Server
+        run: |
+          cd server
+          npm install
+          npm run type-check
+          npm run test
           cd ..
 
       # 2. Préparation de la clé SSH pour le transfert

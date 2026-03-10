@@ -1,15 +1,24 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, AlertTriangle, ChevronRight, Plus, Trash2, Hash, Copy, Key, Edit3, Check, X } from 'lucide-react';
+import { Shield, AlertTriangle, ChevronRight, Plus, Trash2, Hash, Copy, Edit3, Check, X } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
 import CPULoad from '../ui/CPULoad';
 import DecryptingText from '../ui/DecryptingText';
+import { User, DeployToken, ApiResponse } from '../../../../shared/types';
 
-function UserRow({ user, currentUser, onRemove, onUpdate, getSetupUrl, copyToClipboard }) {
+interface UserRowProps {
+    user: User;
+    currentUser: User | null;
+    onRemove: () => void;
+    onUpdate: () => void;
+    getSetupUrl: (token: string) => string;
+    copyToClipboard: (text: string) => void;
+}
+
+function UserRow({ user, currentUser, onRemove, onUpdate, getSetupUrl, copyToClipboard }: UserRowProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [tempName, setTempName] = useState(user.username);
     const isMe = currentUser && currentUser.id === user.id;
-
 
     const saveEdit = async () => {
         if (!tempName || tempName === user.username) return setIsEditing(false);
@@ -75,7 +84,7 @@ function UserRow({ user, currentUser, onRemove, onUpdate, getSetupUrl, copyToCli
                 <div className="flex items-center gap-2 bg-black/40 p-1.5 border border-cyan-dark/20">
                     <Hash size={10} className="text-gray-600" />
                     <input type="text" className="bg-transparent border-none text-[9px] text-gray-500 font-mono w-full outline-none" value={getSetupUrl(user.setupToken)} readOnly />
-                    <button onClick={() => copyToClipboard(getSetupUrl(user.setupToken))} className="text-[#00d4ff] hover:text-white"><Copy size={12} /></button>
+                    <button onClick={() => user.setupToken && copyToClipboard(getSetupUrl(user.setupToken))} className="text-[#00d4ff] hover:text-white"><Copy size={12} /></button>
                 </div>
             )}
             {!user.setupToken && (
@@ -88,13 +97,17 @@ function UserRow({ user, currentUser, onRemove, onUpdate, getSetupUrl, copyToCli
     );
 }
 
-export default function AdminModal({ onClose, currentUser }) {
+interface AdminModalProps {
+    onClose: () => void;
+    currentUser: User | null;
+}
 
-    const [users, setUsers] = useState([]);
-    const [tokens, setTokens] = useState([]);
-    const [newUsername, setNewUsername] = useState('');
-    const [lastGeneratedToken, setLastGeneratedToken] = useState(null);
-    const [copySuccess, setCopySuccess] = useState(false);
+export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
+    const [users, setUsers] = useState<User[]>([]);
+    const [tokens, setTokens] = useState<DeployToken[]>([]);
+    const [newUsername, setNewUsername] = useState<string>('');
+    const [lastGeneratedToken, setLastGeneratedToken] = useState<string | null>(null);
+    const [copySuccess, setCopySuccess] = useState<boolean>(false);
 
     const loadData = () => {
         fetch(`${API_BASE}/admin/users`, { credentials: 'include' })
@@ -111,20 +124,16 @@ export default function AdminModal({ onClose, currentUser }) {
     useEffect(() => { loadData(); }, []);
 
     useEffect(() => {
-        const handleEsc = (e) => {
+        const handleEsc = (e: KeyboardEvent) => {
             if (e.key === 'Escape') onClose();
         };
         window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
     }, [onClose]);
 
-
-    const addUser = async (e, usernameOverride = null) => {
+    const addUser = async (e: React.FormEvent | null, usernameOverride: string | null = null) => {
         if (e) e.preventDefault();
         const username = usernameOverride || newUsername;
-
-        // Allow creation if it's explicitly anonymous (both null) or if we have a username
-        if (!username && usernameOverride !== null) return;
 
         const res = await fetch(`${API_BASE}/admin/users`, {
             method: 'POST',
@@ -133,42 +142,27 @@ export default function AdminModal({ onClose, currentUser }) {
             body: JSON.stringify({ username: username || null })
         });
         const data = await res.json();
-        setLastGeneratedToken(data.setupToken);
+        if (data.setupToken) {
+            setLastGeneratedToken(data.setupToken);
+        }
         setNewUsername('');
         loadData();
     };
 
-
-
-
-    const removeUser = async (id) => {
+    const removeUser = async (id: string) => {
         await fetch(`${API_BASE}/admin/users/${id}`, { method: 'DELETE', credentials: 'include' });
         loadData();
     };
 
-    const genToken = async () => {
-        const res = await fetch(`${API_BASE}/admin/tokens`, { method: 'POST', credentials: 'include' });
-        const data = await res.json();
-        setLastGeneratedToken(data.token);
-        loadData();
-    };
-
-    const removeToken = async (id) => {
-        await fetch(`${API_BASE}/admin/tokens/${id}`, { method: 'DELETE', credentials: 'include' });
-        loadData();
-    };
-
-    const copyToClipboard = (text) => {
+    const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
     };
 
-    const getSetupUrl = (setupToken) => `${window.location.origin}?token=${setupToken}`;
-    const getMagicLink = (deployToken) => `${window.location.origin}?config=${deployToken}`;
+    const getSetupUrl = (setupToken: string) => `${window.location.origin}?token=${setupToken}`;
 
     return (
-
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -181,7 +175,6 @@ export default function AdminModal({ onClose, currentUser }) {
                 className="side-drawer h-full w-full max-w-md flex flex-col pt-8 pb-4 px-6 overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
-
                 <div className="flex justify-between items-start mb-10">
                     <div>
                         <h2 className="text-xl font-bold text-[#00d4ff] tracking-[0.3em] flex items-center gap-2 mb-2">
@@ -201,7 +194,6 @@ export default function AdminModal({ onClose, currentUser }) {
                     </button>
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-12 pr-2 scrollbar-hide">
-                    {/* Unified Invitations Panel */}
                     <section className="space-y-8">
                         <div className="flex items-center gap-3 mb-6">
                             <div className="h-[2px] w-8 bg-[#00d4ff]/50"></div>
@@ -232,8 +224,6 @@ export default function AdminModal({ onClose, currentUser }) {
                             </motion.div>
                         )}
 
-
-
                         <div className="flex flex-col gap-3 pb-8">
                             {users.map(u => (
                                 <UserRow
@@ -262,5 +252,3 @@ export default function AdminModal({ onClose, currentUser }) {
         </motion.div>
     );
 }
-
-
