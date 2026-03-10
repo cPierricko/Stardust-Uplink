@@ -11,10 +11,26 @@ export interface AuthStatus {
     user: User | null;
 }
 
-export interface ApiResponse<T> {
+export interface ApiResponse<T = any> {
     success: boolean;
     data?: T;
     error?: string;
+}
+
+export interface Shard {
+    id: string;
+    name: string;
+    slug: string;
+    deploy_method: 'manual' | 'auto';
+    api_token?: string;
+    env_vars: string;
+    path: string;
+}
+
+export interface ShardUploadResponse {
+    id: string;
+    slug: string;
+    url: string;
 }
 
 export interface WebAuthnRegistrationResponse {
