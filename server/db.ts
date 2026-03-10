@@ -33,7 +33,11 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS apps (
     id TEXT PRIMARY KEY,
-    name TEXT UNIQUE,
+    name TEXT,
+    slug TEXT UNIQUE,
+    deploy_method TEXT CHECK(deploy_method IN ('manual', 'auto')),
+    api_token TEXT,
+    env_vars TEXT,
     path TEXT
   );
 
