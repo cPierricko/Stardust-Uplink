@@ -1,6 +1,16 @@
 import { motion } from 'framer-motion';
 
-export default function AppShard({ title = 'COMMS_HUB', mountPoint = '/mnt/comms_hub' }) {
+export interface AppShardProps {
+    title?: string;
+    mountPoint?: string;
+    status?: 'STABLE' | 'UNSTABLE' | 'OFFLINE';
+}
+
+export default function AppShard({
+    title = 'COMMS_HUB',
+    mountPoint = '/mnt/comms_hub',
+    status = 'STABLE'
+}: AppShardProps) {
     return (
         <motion.div whileHover={{ scale: 1.02 }} className="shard-card group cursor-pointer">
             <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-[#00d4ff]/50 group-hover:border-[#00d4ff] transition-colors"></div>
@@ -13,7 +23,7 @@ export default function AppShard({ title = 'COMMS_HUB', mountPoint = '/mnt/comms
                 <div className="flex justify-between items-center">
                     <span>CONNECTION:</span>
                     <span className="text-[#00d4ff] font-bold flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#00d4ff] shadow-neon-cyan"></span> STABLE
+                        <span className={`w-1.5 h-1.5 rounded-full ${status === 'STABLE' ? 'bg-[#00d4ff] shadow-neon-cyan' : status === 'UNSTABLE' ? 'bg-orange-500 shadow-neon-orange' : 'bg-red-500'} `}></span> {status}
                     </span>
                 </div>
                 <div className="flex justify-between items-center">

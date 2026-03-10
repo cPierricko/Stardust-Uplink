@@ -1,0 +1,32 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "outDir": "./dist",
+        "rootDir": "../",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "types": [
+            "node",
+            "express",
+            "cookie-parser",
+            "cors",
+            "jsonwebtoken",
+            "multer",
+            "better-sqlite3"
+        ]
+    },
+    "include": [
+        "**/*.ts",
+        "../shared/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist",
+        "tests"
+    ]
+}

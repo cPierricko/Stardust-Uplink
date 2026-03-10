@@ -1,19 +1,30 @@
-import { useState } from 'react';
+import { useState, ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronUp, Radio } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
+import { DeploymentStatus, ApiResponse } from '../../../../shared/types';
 
-export default function DeploymentModule({ initialToken }) {
-    const [appName, setAppName] = useState('');
-    const [file, setFile] = useState(null);
-    const [token, setToken] = useState(initialToken || '');
-    const [status, setStatus] = useState('');
-    const [progress, setProgress] = useState(0);
-    const [isExpanded, setIsExpanded] = useState(false);
+export interface DeploymentModuleProps {
+    initialToken?: string;
+}
+
+export default function DeploymentModule({ initialToken }: DeploymentModuleProps) {
+    const [appName, setAppName] = useState<string>('');
+    const [file, setFile] = useState<File | null>(null);
+    const [token, setToken] = useState<string>(initialToken || '');
+    const [status, setStatus] = useState<string>('');
+    const [progress, setProgress] = useState<number>(0);
+    const [isExpanded, setIsExpanded] = useState<boolean>(false);
+    const [deploymentState, setDeploymentState] = useState<DeploymentStatus>('idle');
 
 
     const doDeploy = async () => {
-        if (!file || !appName || !token) return setStatus('MISSING PARAMS');
+        if (!file || !appName || !token) {
+            setStatus('MISSING PARAMS');
+            return;
+        }
+
+        setDeploymentState('uploading');
         setStatus('ESTABLISHING UPLINK...');
         setProgress(10);
 
@@ -28,20 +39,50 @@ export default function DeploymentModule({ initialToken }) {
         }, 200);
 
         const fd = new FormData();
-        fd.append('bundle', file);
+        fd.append('app', file); // Changed from 'bundle' to 'app' to match server/routes/deploy.ts
 
         try {
-            const res = await fetch(`${API_BASE}/deploy/${appName}`, {
-                method: 'POST', headers: { 'x-deploy-token': token }, body: fd
+            const res = await fetch(`${API_BASE}/deploy/upload`, {
+                method: 'POST',
+                headers: {
+                    'x-deploy-token': token
+                },
+                body: fd
             });
+
+            const result: ApiResponse<{ url: string }> = await res.json();
+
             clearInterval(interval);
-            setProgress(100);
-            setStatus(res.ok ? 'UPLINK SUCCESSFUL' : 'UPLINK FAILED');
+
+            if (res.ok && result.success) {
+                setProgress(100);
+                setDeploymentState('completed');
+                setStatus('UPLINK SUCCESSFUL');
+            } else {
+                setProgress(0);
+                setDeploymentState('error');
+                setStatus(result.error || 'UPLINK FAILED');
+            }
         } catch (e) {
             clearInterval(interval);
             setProgress(0);
+            setDeploymentState('error');
             setStatus('CONNECTION LOST');
         }
+    };
+
+    const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            setFile(e.target.files[0]);
+        }
+    };
+
+    const handleAppNameChange = (e: ChangeEvent<HTMLInputElement>) => {
+        setAppName(e.target.value);
+    };
+
+    const handleTokenChange = (e: ChangeEvent<HTMLInputElement>) => {
+        setToken(e.target.value);
     };
 
     return (
@@ -95,7 +136,7 @@ export default function DeploymentModule({ initialToken }) {
                                 <div className="flex-1 w-full space-y-4">
                                     <div className="relative border border-dashed border-cyan-900/40 bg-black/40 h-24 flex items-center justify-center text-[10px] text-cyan-900 font-mono hover:border-cyan-400/60 hover:text-cyan-400/80 cursor-pointer transition-all w-full group/upload overflow-hidden"
                                         style={{ clipPath: 'polygon(2% 0%, 100% 0%, 100% 90%, 98% 100%, 0% 100%, 0% 10%)' }}>
-                                        <input type="file" onChange={e => setFile(e.target.files[0])} accept=".zip" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                                        <input type="file" onChange={handleFileChange} accept=".zip" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
                                         <div className="absolute inset-0 bg-cyan-400/5 w-0 group-hover/upload:w-full transition-all duration-700 ease-out"></div>
                                         <span className="relative z-10 tracking-[0.2em]">{file ? `[ SHARD: ${file.name.toUpperCase()} ]` : '[ SELECT DATA SHARD .ZIP ]'}</span>
                                     </div>
@@ -110,10 +151,14 @@ export default function DeploymentModule({ initialToken }) {
                                 </div>
 
                                 <div className="flex flex-col gap-3 w-full lg:w-56">
-                                    <input type="text" value={appName} onChange={e => setAppName(e.target.value)} className="bg-black/80 border border-cyan-900/50 text-cyan-400 text-[10px] py-2 px-3 font-mono focus:outline-none focus:border-cyan-400/50 transition-colors tracking-widest" placeholder="SHARD_IDENTIFIER" />
-                                    <input type="password" value={token} onChange={e => setToken(e.target.value)} className="bg-black/80 border border-cyan-900/50 text-cyan-400 text-[10px] py-2 px-3 font-mono focus:outline-none focus:border-cyan-400/50 transition-colors tracking-widest" placeholder="UPLINK_CIPHER" />
-                                    <button onClick={doDeploy} className="w-full py-2 bg-cyan-950/30 border border-cyan-800 text-cyan-500 text-[9px] font-mono tracking-[0.3em] hover:bg-cyan-500/10 hover:border-cyan-400 hover:text-cyan-400 transition-all duration-300 uppercase">
-                                        Initialize Uplink
+                                    <input type="text" value={appName} onChange={handleAppNameChange} className="bg-black/80 border border-cyan-900/50 text-cyan-400 text-[10px] py-2 px-3 font-mono focus:outline-none focus:border-cyan-400/50 transition-colors tracking-widest" placeholder="SHARD_IDENTIFIER" />
+                                    <input type="password" value={token} onChange={handleTokenChange} className="bg-black/80 border border-cyan-900/50 text-cyan-400 text-[10px] py-2 px-3 font-mono focus:outline-none focus:border-cyan-400/50 transition-colors tracking-widest" placeholder="UPLINK_CIPHER" />
+                                    <button
+                                        onClick={doDeploy}
+                                        disabled={deploymentState === 'uploading' || deploymentState === 'extracting'}
+                                        className="w-full py-2 bg-cyan-950/30 border border-cyan-800 text-cyan-500 text-[9px] font-mono tracking-[0.3em] hover:bg-cyan-500/10 hover:border-cyan-400 hover:text-cyan-400 transition-all duration-300 uppercase disabled:opacity-50"
+                                    >
+                                        {deploymentState === 'uploading' || deploymentState === 'extracting' ? 'Uplink active...' : 'Initialize Uplink'}
                                     </button>
                                 </div>
                             </div>

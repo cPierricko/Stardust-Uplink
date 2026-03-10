@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react';
 
-export default function DecryptingText({ text, duration = 1000 }) {
-    const [displayText, setDisplayText] = useState(text);
+interface DecryptingTextProps {
+    text: string;
+    duration?: number;
+}
+
+export default function DecryptingText({ text, duration = 1000 }: DecryptingTextProps) {
+    const [displayText, setDisplayText] = useState<string>(text);
     const chars = 'ABCDEF0123456789!@#$%^&*()_+';
 
     useEffect(() => {

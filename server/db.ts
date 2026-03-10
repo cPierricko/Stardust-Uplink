@@ -1,7 +1,10 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const crypto = require('crypto');
-const fs = require('fs');
+import Database from 'better-sqlite3';
+import path from 'path';
+import crypto from 'crypto';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Ensure db directory exists
 const dbPath = path.resolve(__dirname, 'db.sqlite');
@@ -15,9 +18,9 @@ db.exec(`
     username TEXT UNIQUE,
     currentChallenge TEXT,
     setupToken TEXT,
+    setupTokenExpiresAt INTEGER,
     role TEXT DEFAULT 'operator'
   );
-
 
   CREATE TABLE IF NOT EXISTS credentials (
     id TEXT PRIMARY KEY,
@@ -41,25 +44,10 @@ db.exec(`
   );
 `);
 
-// Add columns if they don't exist
-try {
-  db.exec('ALTER TABLE users ADD COLUMN setupToken TEXT');
-} catch (e) { }
-
-try {
-  db.exec('ALTER TABLE users ADD COLUMN role TEXT DEFAULT "operator"');
-} catch (e) { }
-
-try {
-  db.exec('ALTER TABLE users ADD COLUMN setupTokenExpiresAt INTEGER');
-} catch (e) { }
-
-
-
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM users');
-  const userCountRow = stmt.get();
+  const userCountRow = stmt.get() as { count: number };
 
   if (userCountRow.count === 0) {
     const setupToken = crypto.randomBytes(32).toString('hex');
@@ -69,13 +57,10 @@ function runFirstBootCheck() {
     console.log(`Token: ${setupToken}`);
     console.log('======================================================\n');
 
-    // In a real scenario, we might want to store this token somewhere temporarily 
-    // or validate it against a single 'setup' endpoint until first registration.
-    // For now, let's keep it in memory for the app to validate via an env var or just log it. 
-    process.env.INITIAL_SETUP_TOKEN = setupToken;
+    process.env['INITIAL_SETUP_TOKEN'] = setupToken;
   }
 }
 
 runFirstBootCheck();
 
-module.exports = db;
+export default db;
