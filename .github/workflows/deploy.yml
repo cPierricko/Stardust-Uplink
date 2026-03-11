@@ -61,7 +61,7 @@ jobs:
             ./client/dist/ \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}/client/dist/
 
-      # 5. Production Restart
+      # 6. Production Restart
       - name: Production Restart
         run: |
           ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
@@ -70,9 +70,11 @@ jobs:
             # Installation des dépendances (tsx est dans dependencies)
             npm install --production
             
-            # Redémarrage avec PM2 en utilisant la commande 'npm start'
-            # (qui lance 'tsx index.ts' via package.json)
+            # Exporter NODE_ENV pour que TOUS les processus enfants l'héritent
+            export NODE_ENV=production
+            
+            # Redémarrage avec PM2
             pm2 delete rogue-one || true
-            NODE_ENV=production pm2 start "npm start" --name rogue-one
+            pm2 start "npm start" --name rogue-one --cwd ${{ secrets.VPS_PATH }}
             pm2 save
           EOF
