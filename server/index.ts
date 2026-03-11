@@ -90,7 +90,27 @@ app.use('/apps', requireAuth, (req: Request, res: Response, next: NextFunction) 
 }, express.static((deployRoutes as any).APPS_DIR));
 
 // Dynamic Shards Serving
-app.use('/shards', express.static(SHARDS_DIR));
+app.use('/shards', (req, res, next) => {
+    console.log(`[SERVE_SHARD] Request: ${req.url} (Base: ${SHARDS_DIR})`);
+    next();
+}, express.static(SHARDS_DIR, {
+    dotfiles: 'allow',
+    index: ['index.html', 'index.htm']
+}));
+
+// Route de diagnostic pour l'admin
+app.get('/api/admin/debug-paths', requireAuth, (req, res) => {
+    const report = {
+        cwd: process.cwd(),
+        SHARDS_DIR: SHARDS_DIR,
+        APPS_DIR: (deployRoutes as any).APPS_DIR,
+        shards_exists: fs.existsSync(SHARDS_DIR),
+        shards_contents: fs.existsSync(SHARDS_DIR) ? fs.readdirSync(SHARDS_DIR) : 'MISSING',
+        test_shard_contents: fs.existsSync(path.join(SHARDS_DIR, 'test')) ? fs.readdirSync(path.join(SHARDS_DIR, 'test')) : 'MISSING',
+        env: process.env.NODE_ENV
+    };
+    res.json(report);
+});
 
 // 1. Servir les fichiers statiques (le build du client)
 app.use(express.static(path.join(process.cwd(), 'client', 'dist')));
