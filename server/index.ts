@@ -26,6 +26,41 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
+// Global request logger for debugging
+app.use((req, res, next) => {
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+    next();
+});
+
+// === MAGIC ASSET REDIRECTION ===
+// Automatically handles shards that request assets via absolute paths (e.g. /assets/...)
+// by detecting the Shard Referer and redirecting the request to the correct shard prefix.
+app.use((req: Request, res: Response, next: NextFunction) => {
+    const referer = req.headers.referer;
+    
+    // Only intercept if the request comes from a shard iframe and isn't already targeting /shards or /api
+    if (referer && referer.includes('/shards/') && !req.path.startsWith('/api') && !req.path.startsWith('/shards')) {
+        try {
+            const refUrl = new URL(referer);
+            const match = refUrl.pathname.match(/\/shards\/([^/]+)/);
+            
+            if (match) {
+                const slug = match[1];
+                // Check if it looks like an asset request (extensions or /assets/ folder)
+                const isAsset = /\.(js|css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|ico|webmanifest)$/.test(req.path) || req.path.startsWith('/assets/');
+                
+                if (isAsset) {
+                    console.log(`[MAGIC_REDIRECT] Found orphaned asset ${req.path} for shard ${slug}. Redirecting...`);
+                    return res.redirect(`/shards/${slug}${req.path}`);
+                }
+            }
+        } catch (err) {
+            // Referer wasn't a valid URL, ignore
+        }
+    }
+    next();
+});
+
 // === ROUTES ===
 
 // Public & Session Auth Routes
@@ -52,18 +87,27 @@ app.use('/apps', requireAuth, (req: Request, res: Response, next: NextFunction) 
 // Dynamic Shards Serving
 app.use('/shards/:slug', (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
+    console.log(`[SERVE_SHARD] Request for slug: ${slug}, path: ${req.path}`);
+    console.log(`[SERVE_SHARD] Base SHARDS_DIR: ${SHARDS_DIR}`);
+    
     if (!slug) return res.status(400).send('Slug required');
     
     const requestedPath = path.normalize(req.path);
     if (requestedPath.includes('..')) {
+        console.warn(`[SERVE_SHARD] Forbidden path access: ${requestedPath}`);
         return res.status(403).send('Forbidden');
     }
 
     const appDir = path.join(SHARDS_DIR, slug as string);
-    if (!fs.existsSync(appDir)) {
+    const exists = fs.existsSync(appDir);
+    console.log(`[SERVE_SHARD] Target appDir: ${appDir} (Exists: ${exists})`);
+
+    if (!exists) {
+        console.warn(`[SERVE_SHARD] Shard directory not found: ${appDir}`);
         return res.status(404).send('Shard not found');
     }
 
+    console.log(`[SERVE_SHARD] Serving from: ${appDir}`);
     express.static(appDir)(req, res, next);
 });
 

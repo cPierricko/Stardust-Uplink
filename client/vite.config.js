@@ -9,6 +9,31 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+      },
+      '/shards': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/apps': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      // Assets requested by shards (Magic Redirection targets)
+      '/assets': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/vite.svg': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/registerSW.js': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/manifest.webmanifest': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
       }
     }
   }

@@ -149,4 +149,19 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
     }
 });
 
+/**
+ * GET /api/shards
+ * Returns all shards from the database.
+ */
+router.get('/', (req: Request, res: Response) => {
+    try {
+        const stmt = db.prepare('SELECT * FROM apps ORDER BY name ASC');
+        const shards = stmt.all();
+        res.json({ success: true, data: shards });
+    } catch (err: any) {
+        console.error('[SHARDS] List error:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch shards' });
+    }
+});
+
 export default router;
