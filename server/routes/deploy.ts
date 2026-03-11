@@ -11,9 +11,11 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 const isProd = process.env['NODE_ENV'] === 'production';
-export const APPS_DIR = isProd 
-    ? path.resolve(process.cwd(), '../apps') 
-    : path.resolve(process.cwd(), 'apps');
+
+// Auto-detect: check production path first
+const prodAppsPath = path.resolve(process.cwd(), '../apps');
+const devAppsPath = path.resolve(process.cwd(), 'apps');
+export const APPS_DIR = fs.existsSync(prodAppsPath) ? prodAppsPath : devAppsPath;
 
 if (!fs.existsSync(APPS_DIR)) {
     fs.mkdirSync(APPS_DIR, { recursive: true });

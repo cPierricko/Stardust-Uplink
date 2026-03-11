@@ -26,28 +26,10 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
-// Global request logger for debugging
+// Global request logger
 app.use((req, res, next) => {
     console.log(`[REQUEST] ${req.method} ${req.url}`);
     next();
-});
-
-// Diagnostic public (Top-level)
-app.get('/diag', (req, res) => {
-    try {
-        const paths = {
-            cwd: process.cwd(),
-            __dirname,
-            SHARDS_DIR,
-            shards_exists: fs.existsSync(SHARDS_DIR),
-            shards_ls: fs.existsSync(SHARDS_DIR) ? fs.readdirSync(SHARDS_DIR) : 'NOT_FOUND',
-            parent_ls: fs.readdirSync(path.resolve(process.cwd(), '..')),
-            env_node_env: process.env.NODE_ENV
-        };
-        res.json(paths);
-    } catch (err: any) {
-        res.status(500).json({ error: err.message, stack: err.stack });
-    }
 });
 
 // === MAGIC ASSET REDIRECTION ===
@@ -62,7 +44,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
                 const slug = match[1];
                 const isAsset = /\.(js|css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|ico|webmanifest)$/.test(req.path) || req.path.startsWith('/assets/');
                 if (isAsset) {
-                    console.log(`[MAGIC_REDIRECT] Found orphaned asset ${req.path} for shard ${slug}. Redirecting...`);
+                    console.log(`[MAGIC_REDIRECT] ${req.path} -> /shards/${slug}${req.path}`);
                     return res.redirect(`/shards/${slug}${req.path}`);
                 }
             }
@@ -71,26 +53,39 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     next();
 });
 
-// Shard Static serving (High priority)
-app.use('/shards', (req, res, next) => {
-    const shardRelPath = req.path.replace(/^\//, '');
-    const requestedPath = path.join(SHARDS_DIR, shardRelPath);
-    const exists = fs.existsSync(requestedPath);
+// Shard Static Serving (Manual — bypasses express.static for reliability)
+app.use('/shards', (req: Request, res: Response, next: NextFunction) => {
+    const reqPath = decodeURIComponent(req.path).replace(/^\//, '');
+    const fullPath = path.join(SHARDS_DIR, reqPath);
     
-    if (exists && fs.lstatSync(requestedPath).isFile()) {
-        console.log(`[SHARDS_STATIC] FILE_MATCH: ${req.url} -> serving file`);
-        return express.static(SHARDS_DIR, { dotfiles: 'allow' })(req, res, next);
-    } else if (exists && fs.lstatSync(requestedPath).isDirectory()) {
-         const hasIndex = fs.existsSync(path.join(requestedPath, 'index.html'));
-         console.log(`[SHARDS_STATIC] DIR_MATCH: ${req.url} -> has index: ${hasIndex}`);
-         if (hasIndex) {
-            return express.static(SHARDS_DIR, { dotfiles: 'allow', index: ['index.html'] })(req, res, next);
-         }
+    // Sécurité: empêcher la traversée de répertoire
+    if (fullPath.indexOf(SHARDS_DIR) !== 0) {
+        return res.status(403).send('Forbidden');
     }
+
+    try {
+        if (fs.existsSync(fullPath)) {
+            const stat = fs.lstatSync(fullPath);
+            if (stat.isFile()) {
+                console.log(`[SHARD_SERVE] File: ${fullPath}`);
+                return res.sendFile(fullPath);
+            }
+            if (stat.isDirectory()) {
+                const indexPath = path.join(fullPath, 'index.html');
+                if (fs.existsSync(indexPath)) {
+                    console.log(`[SHARD_SERVE] Index: ${indexPath}`);
+                    return res.sendFile(indexPath);
+                }
+            }
+        }
+    } catch (err) {
+        console.error(`[SHARD_SERVE] Error: ${err}`);
+    }
+    
     next();
 });
 
-// === ROUTES ===
+// === API ROUTES ===
 
 // Public & Session Auth Routes
 app.use('/api/auth', authRoutes);
@@ -118,28 +113,12 @@ app.use('/apps', requireAuth, (req: Request, res: Response, next: NextFunction) 
     next();
 }, express.static((deployRoutes as any).APPS_DIR));
 
-
-// Route de diagnostic pour l'admin
-app.get('/api/admin/debug-paths', requireAuth, (req, res) => {
-    const report = {
-        cwd: process.cwd(),
-        SHARDS_DIR: SHARDS_DIR,
-        APPS_DIR: (deployRoutes as any).APPS_DIR,
-        shards_exists: fs.existsSync(SHARDS_DIR),
-        shards_contents: fs.existsSync(SHARDS_DIR) ? fs.readdirSync(SHARDS_DIR) : 'MISSING',
-        test_shard_contents: fs.existsSync(path.join(SHARDS_DIR, 'test')) ? fs.readdirSync(path.join(SHARDS_DIR, 'test')) : 'MISSING',
-        env: process.env.NODE_ENV
-    };
-    res.json(report);
-});
-
-// 1. Servir les fichiers statiques (le build du client)
+// Servir les fichiers statiques (le build du client)
 app.use(express.static(path.join(process.cwd(), 'client', 'dist')));
 
-// 2. Gestion du Fallback pour React Router
+// Gestion du Fallback pour React Router
 app.use((req: Request, res: Response) => {
     if (req.path.startsWith('/api')) {
-        console.error(`[RO_OS] 404_API_FALLBACK: ${req.method} ${req.originalUrl} - No route matched.`);
         return res.status(404).json({ 
             error: 'API Endpoint not found',
             method: req.method,
@@ -157,9 +136,9 @@ app.use((req: Request, res: Response) => {
 if (process.env['NODE_ENV'] !== 'test') {
     app.listen(PORT, () => {
         console.log(`[RO_OS] Server active on port ${PORT}`);
-        console.log(`[RO_OS] Apps storage: ${(deployRoutes as any).APPS_DIR}`);
+        console.log(`[RO_OS] Shards: ${SHARDS_DIR}`);
+        console.log(`[RO_OS] Apps: ${(deployRoutes as any).APPS_DIR}`);
     });
 }
 
 export default app;
-

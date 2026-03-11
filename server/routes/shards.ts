@@ -17,15 +17,23 @@ router.use((req, res, next) => {
     next();
 });
 
-// Base directory for apps: Production uses sibling storage, Dev uses local project path
+// Base directory for apps: auto-detect based on filesystem
 const isProd = process.env['NODE_ENV'] === 'production';
-export const SHARDS_DIR = isProd 
-    ? path.resolve(process.cwd(), '../storage/apps') 
-    : path.resolve(process.cwd(), 'shards_storage');
+
+// Auto-detect SHARDS_DIR: check production path first, fallback to dev
+const prodShardsPath = path.resolve(process.cwd(), '../storage/apps');
+const devShardsPath = path.resolve(process.cwd(), 'shards_storage');
+
+export const SHARDS_DIR = fs.existsSync(prodShardsPath) ? prodShardsPath : devShardsPath;
 
 const TEMP_DIR = isProd 
     ? '/tmp/stardust-shards'
     : path.resolve(__dirname, '../../temp');
+
+console.log(`[SHARDS_INIT] NODE_ENV=${process.env['NODE_ENV']}, CWD=${process.cwd()}`);
+console.log(`[SHARDS_INIT] SHARDS_DIR=${SHARDS_DIR} (exists: ${fs.existsSync(SHARDS_DIR)})`);
+console.log(`[SHARDS_INIT] Checked prod path: ${prodShardsPath} (exists: ${fs.existsSync(prodShardsPath)})`);
+console.log(`[SHARDS_INIT] Checked dev path: ${devShardsPath} (exists: ${fs.existsSync(devShardsPath)})`);
 
 // Helper to ensure critical directories exist
 const ensureDirs = () => {
