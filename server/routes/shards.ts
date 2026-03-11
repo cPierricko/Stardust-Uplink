@@ -23,7 +23,9 @@ export const SHARDS_DIR = isProd
     ? '/home/deploy/storage/apps' 
     : path.resolve(__dirname, '../../shards_storage');
 
-const TEMP_DIR = path.resolve(__dirname, '../../temp');
+const TEMP_DIR = isProd 
+    ? '/tmp/stardust-shards'
+    : path.resolve(__dirname, '../../temp');
 
 // Helper to ensure critical directories exist
 const ensureDirs = () => {
