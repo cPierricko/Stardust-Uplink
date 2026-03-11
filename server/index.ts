@@ -73,11 +73,10 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/deploy', (deployRoutes as any).router);
 
 // Shards Management Routes
+console.log(`[RO_OS_INIT] Shards storage: ${SHARDS_DIR}`);
 app.use('/api/shards', (req: Request, res: Response, next: NextFunction) => {
-    // Exempt /push from session-based requireAuth
-    if (req.path === '/push' && req.method === 'POST') {
-        return next();
-    }
+    const isPush = req.path.includes('/push') && req.method === 'POST';
+    if (isPush) return next();
     requireAuth(req, res, next);
 }, shardsRoutes);
 
@@ -123,7 +122,12 @@ app.use(express.static(path.join(__dirname, 'client', 'dist')));
 // 2. Gestion du Fallback pour React Router
 app.use((req: Request, res: Response) => {
     if (req.path.startsWith('/api')) {
-        return res.status(404).json({ error: 'API Endpoint not found' });
+        console.error(`[RO_OS] 404_API_FALLBACK: ${req.method} ${req.originalUrl} - No route matched.`);
+        return res.status(404).json({ 
+            error: 'API Endpoint not found',
+            method: req.method,
+            path: req.originalUrl 
+        });
     }
     res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'), (err) => {
         if (err) {

@@ -62,5 +62,6 @@ jobs:
         run: |
           ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd ${{ secrets.VPS_PATH }}
-            
-            # Installation des
+            npm install --production
+            pm2 restart rogue-one || pm2 start index.js --name rogue-one
+          EOF
