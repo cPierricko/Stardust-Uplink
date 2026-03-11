@@ -17,11 +17,11 @@ router.use((req, res, next) => {
     next();
 });
 
-// Base directory for apps: Production uses fixed path, Dev uses local project path
+// Base directory for apps: Production uses sibling storage, Dev uses local project path
 const isProd = process.env['NODE_ENV'] === 'production';
 export const SHARDS_DIR = isProd 
-    ? '/home/deploy/storage/apps' 
-    : path.resolve(__dirname, '../../shards_storage');
+    ? path.resolve(process.cwd(), '../storage/apps') 
+    : path.resolve(process.cwd(), 'shards_storage');
 
 const TEMP_DIR = isProd 
     ? '/tmp/stardust-shards'
