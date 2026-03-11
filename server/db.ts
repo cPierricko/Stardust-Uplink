@@ -53,6 +53,17 @@ db.exec(`
 const tableInfo = db.prepare("PRAGMA table_info(apps)").all() as any[];
 const columnNames = tableInfo.map(info => info.name);
 
+if (!columnNames.includes('slug')) {
+    console.log('[DB_MIGRATION] Adding column slug to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN slug TEXT');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_apps_slug ON apps(slug)');
+}
+
+if (!columnNames.includes('deploy_method')) {
+    console.log('[DB_MIGRATION] Adding column deploy_method to apps table');
+    db.exec("ALTER TABLE apps ADD COLUMN deploy_method TEXT DEFAULT 'manual'");
+}
+
 if (!columnNames.includes('api_token')) {
     console.log('[DB_MIGRATION] Adding column api_token to apps table');
     db.exec('ALTER TABLE apps ADD COLUMN api_token TEXT');
