@@ -97,6 +97,8 @@ function AppContent() {
               key={shard.id} 
               shard={shard} 
               onAccess={() => setActiveShard(shard)} 
+              onUpdate={fetchShards}
+              onDelete={fetchShards}
             />
           ))}
           {shards.length === 0 && (

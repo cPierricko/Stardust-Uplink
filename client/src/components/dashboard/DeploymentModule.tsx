@@ -13,7 +13,6 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
     const [callsign, setCallsign] = useState<string>('');
     const [routingSlug, setRoutingSlug] = useState<string>('');
     const [file, setFile] = useState<File | null>(null);
-    const [token, setToken] = useState<string>(initialToken || '');
     const [status, setStatus] = useState<string>('');
     const [progress, setProgress] = useState<number>(0);
     const [isExpanded, setIsExpanded] = useState<boolean>(false);
@@ -54,7 +53,6 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
         fd.append('app', file);
         fd.append('name', callsign);
         fd.append('slug', routingSlug);
-        fd.append('api_token', token);
 
         try {
             const res = await fetch(`${API_BASE}/shards/upload`, {
@@ -211,20 +209,6 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
                                                     readOnly
                                                     className="w-full bg-cyan-400/5 border border-cyan-900/20 text-cyan-600 text-[11px] py-2.5 px-4 font-mono focus:outline-none transition-all tracking-widest cursor-not-allowed" 
                                                     placeholder="auto-generated-slug" 
-                                                />
-                                            </div>
-
-                                            <div className="group/input">
-                                                <label className="text-[9px] font-mono text-cyan-900 tracking-widest uppercase mb-1.5 block group-focus-within/input:text-cyan-500 transition-colors">
-                                                    UPLINK_CIPHER
-                                                </label>
-                                                <input 
-                                                    type="password" 
-                                                    value={token} 
-                                                    onChange={(e) => setToken(e.target.value)} 
-                                                    disabled={isProcessing}
-                                                    className="w-full bg-black/60 border border-cyan-900/30 text-cyan-400 text-[11px] py-2.5 px-4 font-mono focus:outline-none focus:border-cyan-500/50 transition-all tracking-widest disabled:opacity-50" 
-                                                    placeholder="••••••••••••" 
                                                 />
                                             </div>
                                         </div>

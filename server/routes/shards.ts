@@ -12,6 +12,11 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
+router.use((req, res, next) => {
+    console.log(`[SHARDS_ROUTER] ENTER: ${req.method} ${req.url}`);
+    next();
+});
+
 // Base directory for apps: Production uses fixed path, Dev uses local project path
 const isProd = process.env['NODE_ENV'] === 'production';
 export const SHARDS_DIR = isProd 
@@ -62,7 +67,7 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
         return res.status(400).json({ error: 'No ZIP file uploaded' });
     }
 
-    const { name, slug, deploy_method, api_token, env_vars } = req.body;
+    const { name, slug, deploy_method, env_vars } = req.body;
     
     if (!slug) {
         return res.status(400).json({ error: 'Slug is required' });
@@ -105,6 +110,9 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
             console.log(`[SHARDS] Flattened nested 'dist' folder for ${appSlug}`);
         }
 
+        // Generate Server-Side Token
+        const api_token = crypto.randomUUID();
+
         // Save to Database
         const id = crypto.randomUUID();
         const stmt = db.prepare(`
@@ -117,7 +125,7 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
             name || appSlug,
             appSlug,
             deploy_method || 'manual',
-            api_token || null,
+            api_token,
             env_vars || '{}',
             extractPath
         );
@@ -127,7 +135,8 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
             data: {
                 id,
                 slug: appSlug,
-                url: `/shards/${appSlug}`
+                url: `/shards/${appSlug}`,
+                api_token // Return it once for the user to copy
             }
         });
 
@@ -146,6 +155,95 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
                 console.error('[SHARDS] Failed to clean up temp file:', unlinkErr);
             }
         }
+    }
+});
+
+/**
+ * DELETE /api/shards/:id
+ * Removes shard files and database entry.
+ */
+router.delete('/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const app = db.prepare('SELECT * FROM apps WHERE id = ?').get(id) as any;
+        if (!app) {
+            return res.status(404).json({ success: false, error: 'Shard not found' });
+        }
+
+        // Remove files
+        if (app.path && fs.existsSync(app.path)) {
+            try {
+                fs.rmSync(app.path, { recursive: true, force: true });
+                console.log(`[SHARDS] DELETED_FILES: ${app.slug} at ${app.path}`);
+            } catch (fsErr: any) {
+                console.warn(`[SHARDS] FILE_CLEANUP_FAILED: ${app.slug}. Proceeding with DB removal.`, fsErr.message);
+            }
+        } else {
+            console.warn(`[SHARDS] DELETE_SKIPPED: Path not found for ${app.slug}`);
+        }
+
+        // Remove from DB
+        const result = db.prepare('DELETE FROM apps WHERE id = ?').run(id);
+        console.log(`[SHARDS] DB_REMOVAL: ${app.slug} (Affected: ${result.changes})`);
+
+        res.json({ success: true, message: 'SHARD_DELETED_SUCCESSFULLY' });
+    } catch (err: any) {
+        console.error('[SHARDS] CRITICAL_DELETE_ERROR:', err);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to delete shard',
+            details: err.message 
+        });
+    }
+});
+
+/**
+ * PATCH /api/shards/:id/env
+ * Updates environment variables.
+ */
+router.patch('/:id/env', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { env_vars } = req.body;
+
+    try {
+        // Validate JSON if it's a string
+        if (typeof env_vars === 'string') {
+            JSON.parse(env_vars);
+        }
+
+        const stmt = db.prepare('UPDATE apps SET env_vars = ? WHERE id = ?');
+        const result = stmt.run(
+            typeof env_vars === 'string' ? env_vars : JSON.stringify(env_vars),
+            id
+        );
+
+        if (result.changes === 0) {
+            return res.status(404).json({ success: false, error: 'Shard not found' });
+        }
+
+        res.json({ success: true, message: 'ENVIRONMENT_UPDATED' });
+    } catch (err: any) {
+        console.error('[SHARDS] Env update error:', err);
+        res.status(400).json({ success: false, error: 'Invalid environment data' });
+    }
+});
+
+/**
+ * GET /api/shards/:id/token
+ * Returns the deployment token.
+ */
+router.get('/:id/token', (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const app = db.prepare('SELECT api_token FROM apps WHERE id = ?').get(id) as any;
+        if (!app) {
+            return res.status(404).json({ success: false, error: 'Shard not found' });
+        }
+
+        res.json({ success: true, api_token: app.api_token });
+    } catch (err: any) {
+        console.error('[SHARDS] Token fetch error:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch token' });
     }
 });
 
