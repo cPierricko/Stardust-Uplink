@@ -143,3 +143,8 @@ server/apps/
 # OS Specific
 .DS_Store
 Thumbs.db
+
+# Rogue One
+server/apps/
+shards_storage/
+temp/

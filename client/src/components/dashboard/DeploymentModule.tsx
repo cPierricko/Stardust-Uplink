@@ -29,7 +29,8 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
     }, [callsign]);
 
     const doDeploy = async () => {
-        if (!file || !callsign || !routingSlug || !token) {
+        if (!file || !callsign || !routingSlug) {
+            console.warn('[UPLINK] Missing required parameters:', { hasFile: !!file, callsign, routingSlug });
             setStatus('UPLINK_ERROR: MISSING_PARAMETERS');
             setDeploymentState('error');
             return;

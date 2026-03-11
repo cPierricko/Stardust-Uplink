@@ -12,24 +12,30 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-// Base directory for apps as requested
-export const SHARDS_DIR = '/home/deploy/storage/apps';
+// Base directory for apps: Production uses fixed path, Dev uses local project path
+const isProd = process.env['NODE_ENV'] === 'production';
+export const SHARDS_DIR = isProd 
+    ? '/home/deploy/storage/apps' 
+    : path.resolve(__dirname, '../../shards_storage');
+
 const TEMP_DIR = path.resolve(__dirname, '../../temp');
 
-// Ensure directories exist
-if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
-}
+// Helper to ensure critical directories exist
+const ensureDirs = () => {
+    [TEMP_DIR, SHARDS_DIR].forEach(dir => {
+        if (!fs.existsSync(dir)) {
+            try {
+                fs.mkdirSync(dir, { recursive: true });
+                console.log(`[SHARDS] Initialized directory: ${dir}`);
+            } catch (err) {
+                console.error(`[SHARDS] SYSTEM_CRITICAL: Could not initialize ${dir}. Storage may be unavailable.`);
+            }
+        }
+    });
+};
 
-// Ensure SHARDS_DIR exists (might need sudo if literal, but we'll try)
-try {
-    if (!fs.existsSync(SHARDS_DIR)) {
-        fs.mkdirSync(SHARDS_DIR, { recursive: true });
-    }
-} catch (err) {
-    console.warn(`[SHARDS] Could not create ${SHARDS_DIR}, falling back to local storage.`);
-    // Fallback if the requested absolute path is not accessible/writable
-}
+// Initial setup
+ensureDirs();
 
 // Multer configuration for temporary storage
 const storage = multer.diskStorage({
@@ -49,6 +55,9 @@ const upload = multer({ storage });
  * Expects: ZIP file in 'app' field, 'name' and 'slug' in body.
  */
 router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
+    // Audit storage readiness for every request
+    ensureDirs();
+
     if (!req.file) {
         return res.status(400).json({ error: 'No ZIP file uploaded' });
     }
@@ -73,8 +82,28 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
         fs.mkdirSync(extractPath, { recursive: true });
         zip.extractAllTo(extractPath, true);
 
-        // Delete temp file
-        fs.unlinkSync(req.file.path);
+        // ZIP Structure Handling: 
+        // 1. Clean up common metadata/junk first
+        const itemsToClean = ['__MACOSX', '.DS_Store'];
+        for (const item of fs.readdirSync(extractPath)) {
+            if (itemsToClean.includes(item)) {
+                fs.rmSync(path.join(extractPath, item), { recursive: true, force: true });
+            }
+        }
+
+        // 2. If ZIP contains only a 'dist' folder after cleanup, move its contents to root
+        const remainingItems = fs.readdirSync(extractPath);
+        if (remainingItems.length === 1 && remainingItems[0] === 'dist') {
+            const distPath = path.join(extractPath, 'dist');
+            const distItems = fs.readdirSync(distPath);
+            
+            for (const item of distItems) {
+                fs.renameSync(path.join(distPath, item), path.join(extractPath, item));
+            }
+            
+            fs.rmSync(distPath, { recursive: true });
+            console.log(`[SHARDS] Flattened nested 'dist' folder for ${appSlug}`);
+        }
 
         // Save to Database
         const id = crypto.randomUUID();
@@ -95,14 +124,28 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
 
         res.json({
             success: true,
-            id,
-            slug: appSlug,
-            url: `/shards/${appSlug}`
+            data: {
+                id,
+                slug: appSlug,
+                url: `/shards/${appSlug}`
+            }
         });
 
     } catch (err: any) {
         console.error('[SHARDS] Upload error:', err);
-        res.status(500).json({ error: 'Failed to process application upload', details: err.message });
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to process application upload', 
+            details: err.message 
+        });
+    } finally {
+        if (req.file) {
+            try {
+                fs.unlinkSync(req.file.path);
+            } catch (unlinkErr) {
+                console.error('[SHARDS] Failed to clean up temp file:', unlinkErr);
+            }
+        }
     }
 });
 

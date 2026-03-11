@@ -38,7 +38,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/deploy', (deployRoutes as any).router);
 
 // Shards Management Routes
-app.use('/api/shards', shardsRoutes);
+app.use('/api/shards', requireAuth, shardsRoutes);
 
 // Secure Static Apps Serving
 app.use('/apps', requireAuth, (req: Request, res: Response, next: NextFunction) => {
