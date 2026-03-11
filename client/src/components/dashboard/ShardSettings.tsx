@@ -117,13 +117,6 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
         }
     };
 
-    const copyToken = () => {
-        if (token) {
-            navigator.clipboard.writeText(token);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        }
-    };
 
     const workflowTemplate = `name: Stardust Shard Deploy
 on:
@@ -158,13 +151,17 @@ jobs:
             <AnimatePresence>
                 {notification && (
                     <motion.div
-                        initial={{ opacity: 0, y: -10 }}
+                        initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className={`absolute top-2 left-2 right-2 z-20 px-4 py-2 font-mono text-[8px] tracking-[0.2em] border shadow-lg ${
-                            notification.type === 'error' ? 'text-[#ff003c] border-[#ff003c] bg-[#ff003c]/10' : 'text-emerald-500 border-emerald-500 bg-emerald-500/10'
+                        exit={{ opacity: 0, y: -20 }}
+                        className={`absolute top-0 left-0 right-0 z-[100] px-4 py-3 font-mono text-[9px] tracking-[0.3em] border-b shadow-2xl flex items-center justify-center gap-3 backdrop-blur-xl ${
+                            notification.type === 'error' 
+                                ? 'text-[#ff003c] border-[#ff003c]/40 bg-[#ff003c]/20' 
+                                : 'text-emerald-400 border-emerald-500/40 bg-emerald-500/20'
                         }`}
+                        style={{ textShadow: '0 0 10px rgba(0,0,0,0.5)' }}
                     >
+                        <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${notification.type === 'error' ? 'bg-[#ff003c]' : 'bg-emerald-400'}`}></div>
                         {notification.message.toUpperCase()}
                     </motion.div>
                 )}
@@ -203,28 +200,6 @@ jobs:
                     </button>
                 </div>
 
-                {/* Deployment Token */}
-                <div className="space-y-2">
-                    <label className="text-[9px] font-mono text-cyan-900 tracking-widest uppercase flex items-center gap-2">
-                        <Copy size={10} /> API_TOKEN
-                    </label>
-                    <div className="flex gap-2">
-                        <input
-                            type="text"
-                            readOnly
-                            value={token || 'RETRIEVING...'}
-                            className="flex-1 bg-cyan-950/10 border border-cyan-900/20 px-3 py-1.5 text-cyan-700 font-mono text-[9px] tracking-wider outline-none"
-                        />
-                        <button
-                            onClick={copyToken}
-                            disabled={!token}
-                            className="px-3 py-1.5 border border-cyan-800 text-cyan-500 hover:bg-cyan-500/10 transition-all flex items-center gap-2 disabled:opacity-20"
-                        >
-                            {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                            <span className="text-[8px] font-mono tracking-widest uppercase">Copy</span>
-                        </button>
-                    </div>
-                </div>
 
                 {/* Automation Help */}
                 <div className="pt-2 border-t border-cyan-900/20">
@@ -244,21 +219,95 @@ jobs:
                                 exit={{ height: 0, opacity: 0 }}
                                 className="overflow-hidden"
                             >
-                                <div className="p-3 bg-black/40 border-x border-b border-cyan-900/30 space-y-3">
-                                    <p className="text-[8px] text-cyan-800 leading-relaxed font-mono">
-                                        COPY_PASTE WORKFLOW INTO: <br/>
-                                        <span className="text-cyan-600">.github/workflows/deploy.yml</span>
-                                    </p>
-                                    <pre className="p-2 bg-black/60 text-[7px] text-cyan-400 font-mono overflow-x-auto custom-scrollbar border border-cyan-900/20 leading-tight">
-                                        {workflowTemplate}
-                                    </pre>
-                                    <button
-                                        onClick={copyWorkflow}
-                                        className="w-full py-1.5 border border-cyan-800 text-cyan-500 text-[8px] font-mono tracking-widest hover:bg-cyan-500/10 flex items-center justify-center gap-2 uppercase"
-                                    >
-                                        {workflowCopied ? <Check size={10} /> : <Copy size={10} />}
-                                        {workflowCopied ? 'Template_Copied' : 'Copy_Yaml_Template'}
-                                    </button>
+                                <div className="p-3 bg-black/40 border-x border-b border-cyan-900/30 space-y-4">
+                                    <div className="space-y-3">
+                                        <p className="text-[8px] text-cyan-800 leading-relaxed font-mono uppercase tracking-widest border-b border-cyan-900/20 pb-1">
+                                            REQUIRED_GITHUB_SECRETS
+                                        </p>
+                                        
+                                        {/* Secret 1: URL */}
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between items-center text-[7px] font-mono text-cyan-700">
+                                                <div className="flex items-center gap-1">
+                                                    <span>NAME: STARDUST_API_URL</span>
+                                                    <button 
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText('STARDUST_API_URL');
+                                                            showNotification('NAME_COPIED');
+                                                        }}
+                                                        className="hover:text-cyan-400 opacity-50 hover:opacity-100 transition-opacity"
+                                                        title="Copy Secret Name"
+                                                    >
+                                                        <Copy size={7} />
+                                                    </button>
+                                                </div>
+                                                <button 
+                                                    onClick={() => {
+                                                        navigator.clipboard.writeText(window.location.origin);
+                                                        showNotification('URL_COPIED');
+                                                    }}
+                                                    className="hover:text-cyan-400 flex items-center gap-1"
+                                                >
+                                                    <span className="text-[6px] uppercase opacity-50">Copy Value</span>
+                                                    <Copy size={8} />
+                                                </button>
+                                            </div>
+                                            <div className="p-1.5 bg-cyan-950/20 border border-cyan-900/20 text-cyan-500 font-mono text-[8px] truncate">
+                                                {window.location.origin}
+                                            </div>
+                                        </div>
+
+                                        {/* Secret 2: Token */}
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between items-center text-[7px] font-mono text-cyan-700">
+                                                <div className="flex items-center gap-1">
+                                                    <span>NAME: STARDUST_SHARD_TOKEN</span>
+                                                    <button 
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText('STARDUST_SHARD_TOKEN');
+                                                            showNotification('NAME_COPIED');
+                                                        }}
+                                                        className="hover:text-cyan-400 opacity-50 hover:opacity-100 transition-opacity"
+                                                        title="Copy Secret Name"
+                                                    >
+                                                        <Copy size={7} />
+                                                    </button>
+                                                </div>
+                                                <button 
+                                                    onClick={() => {
+                                                        if (token) {
+                                                            navigator.clipboard.writeText(token);
+                                                            showNotification('TOKEN_COPIED');
+                                                        }
+                                                    }}
+                                                    className="hover:text-cyan-400 flex items-center gap-1"
+                                                >
+                                                    <span className="text-[6px] uppercase opacity-50">Copy Value</span>
+                                                    <Copy size={8} />
+                                                </button>
+                                            </div>
+                                            <div className="p-1.5 bg-cyan-950/20 border border-cyan-900/20 text-cyan-500 font-mono text-[8px] truncate">
+                                                {token || 'RETRIEVING...'}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-cyan-900/20">
+                                        <p className="text-[8px] text-cyan-800 leading-relaxed font-mono">
+                                            WORKFLOW_FILE_PATH: <br/>
+                                            <span className="text-cyan-600">.github/workflows/deploy.yml</span>
+                                        </p>
+                                        <pre className="p-2 bg-black/60 text-[7px] text-cyan-400 font-mono overflow-x-auto custom-scrollbar border border-cyan-900/20 leading-tight h-24">
+                                            {workflowTemplate}
+                                        </pre>
+                                        <button
+                                            onClick={copyWorkflow}
+                                            className="w-full py-1.5 border border-cyan-800 text-cyan-500 text-[8px] font-mono tracking-widest hover:bg-cyan-500/10 flex items-center justify-center gap-2 uppercase"
+                                        >
+                                            {workflowCopied ? <Check size={10} /> : <Copy size={10} />}
+                                            {workflowCopied ? 'Template_Copied' : 'Copy_Yaml_Template'}
+                                        </button>
+                                    </div>
                                 </div>
                             </motion.div>
                         )}

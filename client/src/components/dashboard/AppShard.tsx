@@ -18,9 +18,8 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppSha
     return (
         <div className="relative group/card h-full min-h-[220px]">
             <motion.div 
-                whileHover={{ scale: showSettings ? 1 : 1.02 }} 
-                className={`shard-card h-full group cursor-pointer transition-all duration-500 ${showSettings ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-                onClick={() => onAccess(shard)}
+                whileHover={{ scale: 1.02 }} 
+                className="shard-card h-full group transition-all duration-500"
             >
                 <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-[#00d4ff]/50 group-hover:border-[#00d4ff] transition-colors"></div>
                 <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-cyan-dark group-hover:border-[#00d4ff]/80 transition-colors"></div>
@@ -54,7 +53,10 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppSha
                     </div>
                 </div>
 
-                <button className="btn-primary text-[10px] w-full py-2 group-hover:bg-[#00d4ff]/20 flex items-center justify-center gap-2 tracking-[0.2em] uppercase">
+                <button 
+                    onClick={() => onAccess(shard)}
+                    className="btn-primary text-[10px] w-full py-2 group-hover:bg-[#00d4ff]/20 flex items-center justify-center gap-2 tracking-[0.2em] uppercase"
+                >
                     <ExternalLink size={12} /> Access Shard
                 </button>
             </motion.div>
@@ -62,17 +64,28 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppSha
             <AnimatePresence>
                 {showSettings && (
                     <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        className="absolute inset-0 z-10 bg-[#0a0f18]"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-8"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget) setShowSettings(false);
+                        }}
                     >
-                        <ShardSettings 
-                            shard={shard} 
-                            onClose={() => setShowSettings(false)} 
-                            onUpdate={onUpdate}
-                            onDelete={onDelete}
-                        />
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            className="w-full max-w-lg max-h-[90vh] relative shadow-2xl shadow-cyan-900/20"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <ShardSettings 
+                                shard={shard} 
+                                onClose={() => setShowSettings(false)} 
+                                onUpdate={onUpdate}
+                                onDelete={onDelete}
+                            />
+                        </motion.div>
                     </motion.div>
                 )}
             </AnimatePresence>
