@@ -73,7 +73,13 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/deploy', (deployRoutes as any).router);
 
 // Shards Management Routes
-app.use('/api/shards', requireAuth, shardsRoutes);
+app.use('/api/shards', (req: Request, res: Response, next: NextFunction) => {
+    // Exempt /push from session-based requireAuth
+    if (req.path === '/push' && req.method === 'POST') {
+        return next();
+    }
+    requireAuth(req, res, next);
+}, shardsRoutes);
 
 // Secure Static Apps Serving
 app.use('/apps', requireAuth, (req: Request, res: Response, next: NextFunction) => {

@@ -63,10 +63,6 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
     // Audit storage readiness for every request
     ensureDirs();
 
-    if (!req.file) {
-        return res.status(400).json({ error: 'No ZIP file uploaded' });
-    }
-
     const { name, slug, deploy_method, env_vars } = req.body;
     
     if (!slug) {
@@ -77,37 +73,63 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
     const extractPath = path.join(SHARDS_DIR, appSlug);
 
     try {
-        // Extract ZIP
-        const zip = new AdmZip(req.file.path);
-        
-        if (fs.existsSync(extractPath)) {
-            fs.rmSync(extractPath, { recursive: true, force: true });
-        }
-        
-        fs.mkdirSync(extractPath, { recursive: true });
-        zip.extractAllTo(extractPath, true);
-
-        // ZIP Structure Handling: 
-        // 1. Clean up common metadata/junk first
-        const itemsToClean = ['__MACOSX', '.DS_Store'];
-        for (const item of fs.readdirSync(extractPath)) {
-            if (itemsToClean.includes(item)) {
-                fs.rmSync(path.join(extractPath, item), { recursive: true, force: true });
-            }
-        }
-
-        // 2. If ZIP contains only a 'dist' folder after cleanup, move its contents to root
-        const remainingItems = fs.readdirSync(extractPath);
-        if (remainingItems.length === 1 && remainingItems[0] === 'dist') {
-            const distPath = path.join(extractPath, 'dist');
-            const distItems = fs.readdirSync(distPath);
+        if (req.file) {
+            // Extract ZIP
+            const zip = new AdmZip(req.file.path);
             
-            for (const item of distItems) {
-                fs.renameSync(path.join(distPath, item), path.join(extractPath, item));
+            if (fs.existsSync(extractPath)) {
+                fs.rmSync(extractPath, { recursive: true, force: true });
             }
             
-            fs.rmSync(distPath, { recursive: true });
-            console.log(`[SHARDS] Flattened nested 'dist' folder for ${appSlug}`);
+            fs.mkdirSync(extractPath, { recursive: true });
+            zip.extractAllTo(extractPath, true);
+
+            // ZIP Structure Handling (Flattening)
+            const itemsToClean = ['__MACOSX', '.DS_Store'];
+            for (const item of fs.readdirSync(extractPath)) {
+                if (itemsToClean.includes(item)) {
+                    fs.rmSync(path.join(extractPath, item), { recursive: true, force: true });
+                }
+            }
+
+            const remainingItems = fs.readdirSync(extractPath);
+            if (remainingItems.length === 1 && remainingItems[0] === 'dist') {
+                const distPath = path.join(extractPath, 'dist');
+                const distItems = fs.readdirSync(distPath);
+                for (const item of distItems) {
+                    fs.renameSync(path.join(distPath, item), path.join(extractPath, item));
+                }
+                fs.rmSync(distPath, { recursive: true });
+                console.log(`[SHARDS] Flattened nested 'dist' folder for ${appSlug}`);
+            }
+        } else {
+            // Initialize EMPTY/SHELL shard
+            if (fs.existsSync(extractPath)) {
+                fs.rmSync(extractPath, { recursive: true, force: true });
+            }
+            fs.mkdirSync(extractPath, { recursive: true });
+            
+            const placeholder = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shard Pending</title>
+    <style>
+        body { background: #0a0f18; color: #00d4ff; font-family: monospace; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .box { border: 1px solid #00d4ff50; padding: 2rem; text-align: center; }
+        .blink { animation: blink 1s steps(1) infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div>UPLINK_ESTABLISHED: ${appSlug.toUpperCase()}</div>
+        <div style="margin-top: 10px; color: #334155;">STATUS: WAITING_FOR_PAYLOAD<span class="blink">_</span></div>
+    </div>
+</body>
+</html>`;
+            fs.writeFileSync(path.join(extractPath, 'index.html'), placeholder);
+            console.log(`[SHARDS] Initialized shell shard: ${appSlug}`);
         }
 
         // Generate Server-Side Token
@@ -244,6 +266,99 @@ router.get('/:id/token', (req: Request, res: Response) => {
     } catch (err: any) {
         console.error('[SHARDS] Token fetch error:', err);
         res.status(500).json({ success: false, error: 'Failed to fetch token' });
+    }
+});
+
+/**
+ * POST /api/shards/push
+ * CI/CD Endpoint: Authenticates via X-Stardust-Token.
+ * Expects: ZIP file in 'app' field.
+ */
+router.post('/push', upload.single('app'), (req: Request, res: Response) => {
+    const token = req.headers['x-stardust-token'];
+    
+    if (!token) {
+        return res.status(401).json({ success: false, error: 'X-Stardust-Token header required' });
+    }
+
+    if (!req.file) {
+        return res.status(400).json({ success: false, error: 'No ZIP file uploaded' });
+    }
+
+    try {
+        // Find shard by token
+        const shard = db.prepare('SELECT * FROM apps WHERE api_token = ?').get(token) as any;
+        
+        if (!shard) {
+            return res.status(403).json({ success: false, error: 'Invalid deployment token' });
+        }
+
+        console.log(`[CI/CD] Incoming push for shard: ${shard.slug} (${shard.name})`);
+        
+        const extractPath = shard.path;
+
+        // Ensure directory exists (it should if shard exists, but good to be safe)
+        if (!fs.existsSync(extractPath)) {
+            fs.mkdirSync(extractPath, { recursive: true });
+        }
+
+        // Extract ZIP
+        const zip = new AdmZip(req.file.path);
+        
+        // Clean existing files if necessary, or just extract over them
+        // For a true "push", usually we want to wipe the old state
+        const items = fs.readdirSync(extractPath);
+        for (const item of items) {
+             fs.rmSync(path.join(extractPath, item), { recursive: true, force: true });
+        }
+        
+        zip.extractAllTo(extractPath, true);
+
+        // ZIP Flattening Logic (re-use same as upload)
+        const itemsToClean = ['__MACOSX', '.DS_Store'];
+        for (const item of fs.readdirSync(extractPath)) {
+            if (itemsToClean.includes(item)) {
+                fs.rmSync(path.join(extractPath, item), { recursive: true, force: true });
+            }
+        }
+
+        const remainingItems = fs.readdirSync(extractPath);
+        if (remainingItems.length === 1 && remainingItems[0] === 'dist') {
+            const distPath = path.join(extractPath, 'dist');
+            const distItems = fs.readdirSync(distPath);
+            for (const item of distItems) {
+                fs.renameSync(path.join(distPath, item), path.join(extractPath, item));
+            }
+            fs.rmSync(distPath, { recursive: true });
+            console.log(`[CI/CD] Flattened nested 'dist' folder for ${shard.slug}`);
+        }
+
+        console.log(`[CI/CD] SUCCESSFULLY_DEPLOYED: ${shard.slug}`);
+        
+        res.json({
+            success: true,
+            message: 'DEPLOYMENT_SUCCESSFUL',
+            data: {
+                slug: shard.slug,
+                url: `/shards/${shard.slug}`
+            }
+        });
+
+    } catch (err: any) {
+        console.error('[CI/CD] Push error:', err);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to process automated deployment', 
+            details: err.message 
+        });
+    } finally {
+        if (req.file) {
+            try {
+                fs.unlinkSync(req.file.path);
+            } catch (unlinkErr) {
+                console.error('[CI/CD] Cleanup failed:', unlinkErr);
+            }
+        }
     }
 });
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trash2, Save, Copy, Check, X, Terminal, AlertTriangle } from 'lucide-react';
+import { Trash2, Save, Copy, Check, X, Terminal, AlertTriangle, Cpu, ChevronDown, ChevronUp } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
 import { Shard, ApiResponse } from '../../../../shared/types';
 
@@ -19,6 +19,8 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [copied, setCopied] = useState(false);
+    const [showWorkflow, setShowWorkflow] = useState(false);
+    const [workflowCopied, setWorkflowCopied] = useState(false);
 
     useEffect(() => {
         // Fetch token on mount
@@ -123,6 +125,33 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
         }
     };
 
+    const workflowTemplate = `name: Stardust Shard Deploy
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - name: Package & Push
+        run: |
+          cd dist && zip -r ../deploy.zip . && cd ..
+          curl -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+            -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
+            -F "app=@deploy.zip"`;
+
+    const copyWorkflow = () => {
+        navigator.clipboard.writeText(workflowTemplate);
+        setWorkflowCopied(true);
+        setTimeout(() => setWorkflowCopied(false), 2000);
+    };
+
     return (
         <div className="flex flex-col gap-4 p-4 bg-[#0a0f18]/90 backdrop-blur-md border border-cyan-900/50 h-full overflow-y-auto custom-scrollbar relative">
             {/* Notifications (Self-contained) */}
@@ -195,6 +224,45 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
                             <span className="text-[8px] font-mono tracking-widest uppercase">Copy</span>
                         </button>
                     </div>
+                </div>
+
+                {/* Automation Help */}
+                <div className="pt-2 border-t border-cyan-900/20">
+                    <button
+                        onClick={() => setShowWorkflow(!showWorkflow)}
+                        className="w-full flex items-center justify-between px-3 py-2 bg-cyan-950/20 border border-cyan-900/30 text-cyan-500 font-mono text-[9px] tracking-widest hover:bg-cyan-500/5 transition-all uppercase"
+                    >
+                        <span className="flex items-center gap-2"><Cpu size={12} /> Github_Actions_Setup</span>
+                        {showWorkflow ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                    
+                    <AnimatePresence>
+                        {showWorkflow && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden"
+                            >
+                                <div className="p-3 bg-black/40 border-x border-b border-cyan-900/30 space-y-3">
+                                    <p className="text-[8px] text-cyan-800 leading-relaxed font-mono">
+                                        COPY_PASTE WORKFLOW INTO: <br/>
+                                        <span className="text-cyan-600">.github/workflows/deploy.yml</span>
+                                    </p>
+                                    <pre className="p-2 bg-black/60 text-[7px] text-cyan-400 font-mono overflow-x-auto custom-scrollbar border border-cyan-900/20 leading-tight">
+                                        {workflowTemplate}
+                                    </pre>
+                                    <button
+                                        onClick={copyWorkflow}
+                                        className="w-full py-1.5 border border-cyan-800 text-cyan-500 text-[8px] font-mono tracking-widest hover:bg-cyan-500/10 flex items-center justify-center gap-2 uppercase"
+                                    >
+                                        {workflowCopied ? <Check size={10} /> : <Copy size={10} />}
+                                        {workflowCopied ? 'Template_Copied' : 'Copy_Yaml_Template'}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
 
                 {/* Danger Zone */}

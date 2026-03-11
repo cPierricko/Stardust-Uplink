@@ -28,8 +28,8 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
     }, [callsign]);
 
     const doDeploy = async () => {
-        if (!file || !callsign || !routingSlug) {
-            console.warn('[UPLINK] Missing required parameters:', { hasFile: !!file, callsign, routingSlug });
+        if (!callsign || !routingSlug) {
+            console.warn('[UPLINK] Missing required parameters:', { callsign, routingSlug });
             setStatus('UPLINK_ERROR: MISSING_PARAMETERS');
             setDeploymentState('error');
             return;
@@ -50,7 +50,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
         }, 150);
 
         const fd = new FormData();
-        fd.append('app', file);
+        if (file) fd.append('app', file);
         fd.append('name', callsign);
         fd.append('slug', routingSlug);
 
@@ -249,7 +249,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
 
                                                 <button
                                                     onClick={doDeploy}
-                                                    disabled={isProcessing || !file || !callsign}
+                                                    disabled={isProcessing || !callsign}
                                                     className={`w-full py-3 ${isProcessing ? 'bg-amber-500/10 border-amber-500 text-amber-500' : 'bg-[#ff1a1a]/5 border-[#ff1a1a]/40 text-[#ff1a1a] hover:bg-[#ff1a1a]/10 hover:border-[#ff1a1a]'} border text-[10px] font-mono tracking-[0.4em] transition-all duration-500 uppercase disabled:opacity-20 disabled:cursor-not-allowed`}
                                                 >
                                                     {isProcessing ? (
@@ -259,7 +259,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
                                                             <span className="w-1 h-1 bg-current animate-bounce [animation-delay:0.4s]"></span>
                                                             TRANSF_INITIATED
                                                         </span>
-                                                    ) : 'Execute Uplink'}
+                                                    ) : file ? 'Execute Uplink' : 'Initialize Shell'}
                                                 </button>
                                             </div>
                                         </div>
