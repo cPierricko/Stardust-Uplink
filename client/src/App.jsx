@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, useSearchParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Config
@@ -21,60 +21,9 @@ import AppShard from './components/dashboard/AppShard';
 // Admin
 import AdminModal from './components/admin/AdminModal';
 
-function AppContent() {
-  const [searchParams] = useSearchParams();
-  const invitationToken = searchParams.get('token');
-  const deployConfigToken = searchParams.get('config');
-
-
-  const [needsSetup, setNeedsSetup] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [shards, setShards] = useState([]);
-  const [activeShard, setActiveShard] = useState(null);
-
-  const fetchShards = () => {
-    fetch(`${API_BASE}/shards`, { credentials: 'include' })
-      .then(r => r.json())
-      .then(res => {
-        if (res.success) {
-          setShards(res.data);
-        }
-      })
-      .catch(err => console.error('Failed to fetch shards:', err));
-  };
-
-  useEffect(() => {
-    // Check boot status
-    fetch(`${API_BASE}/auth/status`, { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => {
-        setNeedsSetup(data.needsSetup);
-        if (data.isAuthenticated) {
-          setIsAuthenticated(true);
-          setUser(data.user);
-          fetchShards();
-        }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [invitationToken, deployConfigToken]);
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-[#00d4ff] text-xl tracking-widest animate-pulse">INITIALIZING STARDUST LINK...</div>;
-
-  // Enrollment flow (Invitation)
-  if (invitationToken) {
-    return <SetupScreen setupToken={invitationToken} onComplete={() => window.location.href = '/'} />;
-  }
-
-  if (!isAuthenticated) {
-    return <LoginScreen needsSetup={needsSetup} onLogin={() => window.location.reload()} />;
-  }
-
+function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
   return (
-    <div className="min-h-screen p-4 md:p-8 flex flex-col items-center relative selection:bg-[#00d4ff]/30">
+    <div className="min-h-screen p-4 md:p-8 flex flex-col items-center relative selection:bg-[#00d4ff]/30 w-full">
       <Header user={user} onAdminOpen={() => setAdminOpen(true)} />
 
       <main className="w-full max-w-6xl flex flex-col gap-6 flex-1">
@@ -83,7 +32,7 @@ function AppContent() {
             initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }}
             className="lg:col-span-12"
           >
-            <DeploymentModule initialToken={deployConfigToken} onSuccess={fetchShards} />
+            <DeploymentModule onSuccess={fetchShards} />
           </motion.div>
         )}
 
@@ -96,7 +45,7 @@ function AppContent() {
             <AppShard 
               key={shard.id} 
               shard={shard} 
-              onAccess={() => setActiveShard(shard)} 
+              onAccess={(s) => window.location.href = `/${s.slug}`} 
               onUpdate={fetchShards}
               onDelete={fetchShards}
             />
@@ -110,44 +59,105 @@ function AppContent() {
       </main>
 
       <Footer />
+    </div>
+  );
+}
+
+function ShardViewer({ shards }) {
+  const { slug } = useParams();
+  const shard = shards.find(s => s.slug === slug);
+
+  if (!shard) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-red-500 font-mono tracking-widest p-4 text-center">
+        <div className="text-4xl mb-4">404</div>
+        <div>UPLINK_FAILURE: SHARD_NOT_FOUND [{slug?.toUpperCase()}]</div>
+        <button 
+          onClick={() => window.location.href = '/'}
+          className="mt-8 px-6 py-2 border border-red-500/50 hover:bg-red-500/20 transition-all text-[10px]"
+        >
+          RETURN_TO_STARDUST
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black overflow-hidden">
+      <iframe 
+        src={`${window.location.origin}/shards/${shard.slug}/`} 
+        className="w-full h-full border-none"
+        title={shard.name}
+      />
+    </div>
+  );
+}
+
+function AppContent() {
+  const [searchParams] = useSearchParams();
+  const invitationToken = searchParams.get('token');
+
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [shards, setShards] = useState([]);
+
+  const fetchShards = () => {
+    fetch(`${API_BASE}/shards`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          setShards(res.data);
+        }
+      })
+      .catch(err => console.error('Failed to fetch shards:', err));
+  };
+
+  useEffect(() => {
+    fetch(`${API_BASE}/auth/status`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => {
+        setNeedsSetup(data.needsSetup);
+        if (data.isAuthenticated) {
+          setIsAuthenticated(true);
+          setUser(data.user);
+          fetchShards();
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [invitationToken]);
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-[#00d4ff] text-xl tracking-widest animate-pulse font-mono">INITIALIZING STARDUST LINK...</div>;
+
+  if (invitationToken) {
+    return <SetupScreen setupToken={invitationToken} onComplete={() => window.location.href = '/'} />;
+  }
+
+  if (!isAuthenticated) {
+    return <LoginScreen needsSetup={needsSetup} onLogin={() => window.location.reload()} />;
+  }
+
+  return (
+    <>
+      <Routes>
+        <Route path="/" element={
+          <Dashboard 
+            user={user} 
+            shards={shards} 
+            fetchShards={fetchShards} 
+            setAdminOpen={setAdminOpen} 
+          />
+        } />
+        <Route path="/:slug" element={<ShardViewer shards={shards} />} />
+      </Routes>
 
       <AnimatePresence>
         {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} currentUser={user} />}
       </AnimatePresence>
-
-      <AnimatePresence>
-        {activeShard && (
-          <motion.div 
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] bg-black flex flex-col"
-          >
-            <div className="h-14 bg-[#0a0f18] border-b border-[#00d4ff]/30 flex items-center justify-between px-6 z-10">
-              <div className="flex items-center gap-4">
-                <div className="w-2 h-2 rounded-full bg-[#00d4ff] animate-pulse"></div>
-                <span className="text-[#00d4ff] font-mono text-xs tracking-[0.2em]">UPLINK_ESTABLISHED: {activeShard.name.toUpperCase()}</span>
-              </div>
-              <button 
-                onClick={() => setActiveShard(null)}
-                className="group flex items-center gap-3 px-4 py-1.5 border border-red-500/50 hover:bg-red-500/20 transition-all text-red-500"
-              >
-                <span className="text-[10px] font-bold tracking-widest">EXIT_UPLINK</span>
-                <div className="w-4 h-4 relative">
-                  <div className="absolute inset-0 rotate-45 border-t-2 border-red-500"></div>
-                  <div className="absolute inset-0 -rotate-45 border-t-2 border-red-500"></div>
-                </div>
-              </button>
-            </div>
-            <iframe 
-              src={`${window.location.origin}/shards/${activeShard.slug}/`} 
-              className="flex-1 w-full h-full border-none"
-              title={activeShard.name}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+    </>
   );
 }
 
