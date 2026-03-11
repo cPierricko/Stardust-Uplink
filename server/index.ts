@@ -32,31 +32,60 @@ app.use((req, res, next) => {
     next();
 });
 
+// Diagnostic public (Top-level)
+app.get('/diag', (req, res) => {
+    try {
+        const paths = {
+            cwd: process.cwd(),
+            __dirname,
+            SHARDS_DIR,
+            shards_exists: fs.existsSync(SHARDS_DIR),
+            shards_ls: fs.existsSync(SHARDS_DIR) ? fs.readdirSync(SHARDS_DIR) : 'NOT_FOUND',
+            parent_ls: fs.readdirSync(path.resolve(process.cwd(), '..')),
+            env_node_env: process.env.NODE_ENV
+        };
+        res.json(paths);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message, stack: err.stack });
+    }
+});
+
 // === MAGIC ASSET REDIRECTION ===
-// Automatically handles shards that request assets via absolute paths (e.g. /assets/...)
-// by detecting the Shard Referer and redirecting the request to the correct shard prefix.
+// Intercepte les assets orphelins (chemins absolus) demandés depuis une iframe de shard
 app.use((req: Request, res: Response, next: NextFunction) => {
     const referer = req.headers.referer;
-    
-    // Only intercept if the request comes from a shard iframe and isn't already targeting /shards or /api
     if (referer && referer.includes('/shards/') && !req.path.startsWith('/api') && !req.path.startsWith('/shards')) {
         try {
             const refUrl = new URL(referer);
             const match = refUrl.pathname.match(/\/shards\/([^/]+)/);
-            
             if (match) {
                 const slug = match[1];
-                // Check if it looks like an asset request (extensions or /assets/ folder)
                 const isAsset = /\.(js|css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|ico|webmanifest)$/.test(req.path) || req.path.startsWith('/assets/');
-                
                 if (isAsset) {
                     console.log(`[MAGIC_REDIRECT] Found orphaned asset ${req.path} for shard ${slug}. Redirecting...`);
                     return res.redirect(`/shards/${slug}${req.path}`);
                 }
             }
-        } catch (err) {
-            // Referer wasn't a valid URL, ignore
-        }
+        } catch (err) {}
+    }
+    next();
+});
+
+// Shard Static serving (High priority)
+app.use('/shards', (req, res, next) => {
+    const shardRelPath = req.path.replace(/^\//, '');
+    const requestedPath = path.join(SHARDS_DIR, shardRelPath);
+    const exists = fs.existsSync(requestedPath);
+    
+    if (exists && fs.lstatSync(requestedPath).isFile()) {
+        console.log(`[SHARDS_STATIC] FILE_MATCH: ${req.url} -> serving file`);
+        return express.static(SHARDS_DIR, { dotfiles: 'allow' })(req, res, next);
+    } else if (exists && fs.lstatSync(requestedPath).isDirectory()) {
+         const hasIndex = fs.existsSync(path.join(requestedPath, 'index.html'));
+         console.log(`[SHARDS_STATIC] DIR_MATCH: ${req.url} -> has index: ${hasIndex}`);
+         if (hasIndex) {
+            return express.static(SHARDS_DIR, { dotfiles: 'allow', index: ['index.html'] })(req, res, next);
+         }
     }
     next();
 });
@@ -89,14 +118,6 @@ app.use('/apps', requireAuth, (req: Request, res: Response, next: NextFunction) 
     next();
 }, express.static((deployRoutes as any).APPS_DIR));
 
-// Dynamic Shards Serving
-app.use('/shards', (req, res, next) => {
-    console.log(`[SERVE_SHARD] Request: ${req.url} (Base: ${SHARDS_DIR})`);
-    next();
-}, express.static(SHARDS_DIR, {
-    dotfiles: 'allow',
-    index: ['index.html', 'index.htm']
-}));
 
 // Route de diagnostic pour l'admin
 app.get('/api/admin/debug-paths', requireAuth, (req, res) => {
