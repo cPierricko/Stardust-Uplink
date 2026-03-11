@@ -22,7 +22,16 @@ jobs:
           npm run build
           cd ..
 
-      # 2. Setup SSH
+      # 2. Install & Test Server
+      - name: Install & Test Server
+        run: |
+          cd server
+          npm install
+          npm run type-check
+          npm run test
+          cd ..
+
+      # 3. Setup SSH
       - name: Setup SSH
         run: |
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > private_key
