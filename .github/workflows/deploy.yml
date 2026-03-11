@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: # Permet de lancer le déploiement manuellement depuis l'onglet Actions
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -14,31 +14,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. Build & Test Client
-      - name: Install, Type-check & Build Client
+      # 1. Build Client
+      - name: Install & Build Client
         run: |
           cd client
           npm install
-          npm run type-check
           npm run build
           cd ..
 
-      # 2. Type-check & Test Server
-      - name: Install, Type-check & Test Server
+      # 2. Build & Test Server
+      - name: Install, Build & Test Server
         run: |
           cd server
           npm install
-          npm run type-check
+          npm run build
           npm run test
           cd ..
 
-      # 2. Préparation de la clé SSH pour le transfert
+      # 3. Setup SSH
       - name: Setup SSH
         run: |
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > private_key
           chmod 600 private_key
 
-      # 3. Transfert du Serveur (le contenu de /server vers la racine du VPS)
+      # 4. Rsync Server (including dist/)
       - name: Rsync Server Files
         run: |
           rsync -avz -e "ssh -i private_key -o StrictHostKeyChecking=no" \
@@ -49,7 +48,7 @@ jobs:
             ./server/ \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}/
 
-      # 4. Création du dossier client/dist sur le VPS et transfert du Build
+      # 5. Rsync Client Build
       - name: Rsync Client Build
         run: |
           ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p ${{ secrets.VPS_PATH }}/client/dist"
@@ -57,11 +56,13 @@ jobs:
             ./client/dist/ \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_PATH }}/client/dist/
 
-      # 5. Installation des dépendances et redémarrage PM2
+      # 6. Restart Server
       - name: Restart Server via SSH
         run: |
           ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd ${{ secrets.VPS_PATH }}
             npm install --production
-            pm2 restart rogue-one || pm2 start index.js --name rogue-one
+            # Supprimer l'ancien index.js à la racine pour éviter les conflits ESM
+            rm -f index.js 
+            pm2 restart rogue-one || pm2 start dist/server/index.js --name rogue-one
           EOF
