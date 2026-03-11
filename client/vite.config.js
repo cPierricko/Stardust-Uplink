@@ -9,6 +9,11 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['satellite-icon.svg', 'pwa_icon_small.png', 'pwa_icon_large.png'],
+      workbox: {
+        // CRITICAL: Ne pas intercepter les requêtes vers les shards et l'API
+        // Sans ça, le Service Worker sert index.html au lieu du contenu des shards
+        navigateFallbackDenylist: [/^\/shards/, /^\/api/, /^\/apps/]
+      },
       manifest: {
         name: 'Stardust Uplink',
         short_name: 'Stardust',
