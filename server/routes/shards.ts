@@ -281,16 +281,16 @@ router.post('/push', upload.single('app'), (req: Request, res: Response) => {
         return res.status(401).json({ success: false, error: 'X-Stardust-Token header required' });
     }
 
-    if (!req.file) {
-        return res.status(400).json({ success: false, error: 'No ZIP file uploaded' });
-    }
-
     try {
         // Find shard by token
         const shard = db.prepare('SELECT * FROM apps WHERE api_token = ?').get(token) as any;
         
         if (!shard) {
             return res.status(403).json({ success: false, error: 'Invalid deployment token' });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ success: false, error: 'No ZIP file uploaded' });
         }
 
         console.log(`[CI/CD] Incoming push for shard: ${shard.slug} (${shard.name})`);
