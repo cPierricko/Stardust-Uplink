@@ -90,34 +90,10 @@ app.use('/apps', requireAuth, (req: Request, res: Response, next: NextFunction) 
 }, express.static((deployRoutes as any).APPS_DIR));
 
 // Dynamic Shards Serving
-app.use('/shards/:slug', (req: Request, res: Response, next: NextFunction) => {
-    const { slug } = req.params;
-    console.log(`[SERVE_SHARD] Request for slug: ${slug}, path: ${req.path}`);
-    console.log(`[SERVE_SHARD] Base SHARDS_DIR: ${SHARDS_DIR}`);
-    
-    if (!slug) return res.status(400).send('Slug required');
-    
-    const requestedPath = path.normalize(req.path);
-    if (requestedPath.includes('..')) {
-        console.warn(`[SERVE_SHARD] Forbidden path access: ${requestedPath}`);
-        return res.status(403).send('Forbidden');
-    }
-
-    const appDir = path.join(SHARDS_DIR, slug as string);
-    const exists = fs.existsSync(appDir);
-    console.log(`[SERVE_SHARD] Target appDir: ${appDir} (Exists: ${exists})`);
-
-    if (!exists) {
-        console.warn(`[SERVE_SHARD] Shard directory not found: ${appDir}`);
-        return res.status(404).send('Shard not found');
-    }
-
-    console.log(`[SERVE_SHARD] Serving from: ${appDir}`);
-    express.static(appDir)(req, res, next);
-});
+app.use('/shards', express.static(SHARDS_DIR));
 
 // 1. Servir les fichiers statiques (le build du client)
-app.use(express.static(path.join(__dirname, 'client', 'dist')));
+app.use(express.static(path.join(process.cwd(), 'client', 'dist')));
 
 // 2. Gestion du Fallback pour React Router
 app.use((req: Request, res: Response) => {
@@ -129,7 +105,7 @@ app.use((req: Request, res: Response) => {
             path: req.originalUrl 
         });
     }
-    res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'), (err) => {
+    res.sendFile(path.join(process.cwd(), 'client', 'dist', 'index.html'), (err) => {
         if (err) {
             res.status(500).send("Erreur : Interface non trouvée sur le serveur.");
         }

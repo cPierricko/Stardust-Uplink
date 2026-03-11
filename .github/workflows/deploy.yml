@@ -37,7 +37,7 @@ jobs:
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > private_key
           chmod 600 private_key
 
-      # 4. Rsync Server (including dist/)
+      # 4. Rsync Server
       - name: Rsync Server Files
         run: |
           rsync -avz -e "ssh -i private_key -o StrictHostKeyChecking=no" \
@@ -62,7 +62,9 @@ jobs:
           ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd ${{ secrets.VPS_PATH }}
             npm install --production
-            # Supprimer l'ancien index.js à la racine pour éviter les conflits ESM
+            
+            # Forcer la suppression de l'ancien fichier et du processus
             rm -f index.js 
-            pm2 restart rogue-one || pm2 start dist/server/index.js --name rogue-one
+            pm2 delete rogue-one || true
+            pm2 start dist/server/index.js --name rogue-one
           EOF

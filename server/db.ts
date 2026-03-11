@@ -7,7 +7,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Ensure db directory exists
-const dbPath = path.resolve(__dirname, 'db.sqlite');
+// Database path relative to project root
+const dbPath = path.resolve(process.cwd(), 'db.sqlite');
 
 const db = new Database(dbPath, { verbose: console.log });
 
