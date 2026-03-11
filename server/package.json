@@ -5,9 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch index.js",
+    "dev": "tsx watch index.ts",
     "build": "tsc",
-    "start": "node dist/server/index.js",
+    "start": "tsx index.ts",
     "test": "vitest run",
     "type-check": "tsc --noEmit"
   },
@@ -23,7 +23,8 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "multer": "^2.1.1"
+    "multer": "^2.1.1",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
@@ -36,7 +37,6 @@
     "@types/node": "^25.4.0",
     "@types/supertest": "^7.2.0",
     "supertest": "^7.2.2",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }

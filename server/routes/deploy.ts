@@ -10,7 +10,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
-export const APPS_DIR = path.resolve(__dirname, '../../apps');
+const isProd = process.env['NODE_ENV'] === 'production';
+export const APPS_DIR = isProd 
+    ? path.resolve(process.cwd(), '../apps') 
+    : path.resolve(process.cwd(), 'apps');
 
 if (!fs.existsSync(APPS_DIR)) {
     fs.mkdirSync(APPS_DIR, { recursive: true });
