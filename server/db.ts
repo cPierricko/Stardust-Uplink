@@ -48,6 +48,25 @@ db.exec(`
   );
 `);
 
+// Automated Migrations: Ensure apps table has all required columns
+const tableInfo = db.prepare("PRAGMA table_info(apps)").all() as any[];
+const columnNames = tableInfo.map(info => info.name);
+
+if (!columnNames.includes('api_token')) {
+    console.log('[DB_MIGRATION] Adding column api_token to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN api_token TEXT');
+}
+
+if (!columnNames.includes('env_vars')) {
+    console.log('[DB_MIGRATION] Adding column env_vars to apps table');
+    db.exec("ALTER TABLE apps ADD COLUMN env_vars TEXT DEFAULT '{}'");
+}
+
+if (!columnNames.includes('path')) {
+    console.log('[DB_MIGRATION] Adding column path to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN path TEXT');
+}
+
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM users');
