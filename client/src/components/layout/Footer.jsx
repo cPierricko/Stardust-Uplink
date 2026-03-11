@@ -12,7 +12,7 @@ export default function Footer() {
                 <span className="text-gray-400 font-mono typing-anim">{'>'} WAITING FOR NEW DATA PACKET...</span>
             </div>
             <div className="flex justify-between text-[10px] text-gray-600 font-mono tracking-widest px-2">
-                <span>STARDUST INITIATIVE © 2026 // ALL SYSTEMS NOMINAL</span>
+                <span>ROGUE ONE CLOUD © 2026 // ALL SYSTEMS NOMINAL</span>
                 <span>SECURE SHARD: 0x9F41C</span>
             </div>
         </motion.footer>
