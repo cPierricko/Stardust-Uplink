@@ -25,6 +25,8 @@ export interface Shard {
     api_token?: string;
     env_vars: string;
     path: string;
+    has_backend?: boolean;
+    assigned_port?: number;
 }
 
 export interface ShardUploadResponse {

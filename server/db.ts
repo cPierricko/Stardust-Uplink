@@ -79,6 +79,16 @@ if (!columnNames.includes('path')) {
     db.exec('ALTER TABLE apps ADD COLUMN path TEXT');
 }
 
+if (!columnNames.includes('has_backend')) {
+    console.log('[DB_MIGRATION] Adding column has_backend to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN has_backend INTEGER DEFAULT 0');
+}
+
+if (!columnNames.includes('assigned_port')) {
+    console.log('[DB_MIGRATION] Adding column assigned_port to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN assigned_port INTEGER');
+}
+
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM users');

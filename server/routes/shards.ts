@@ -6,6 +6,7 @@ import multer from 'multer';
 import AdmZip from 'adm-zip';
 import crypto from 'crypto';
 import db from '../db.js';
+import runner from '../runner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -210,6 +211,11 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
             }
         });
 
+        // ASYNC RESTART: Check for backend and start if needed
+        setTimeout(() => {
+            runner.startShard(appSlug).catch(err => console.error(`[SHARDS] Auto-start failed for ${appSlug}:`, err));
+        }, 1000);
+
     } catch (err: any) {
         console.error('[SHARDS] Upload error:', err);
         res.status(500).json({ 
@@ -232,13 +238,16 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
  * DELETE /api/shards/:id
  * Removes shard files and database entry.
  */
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
         const app = db.prepare('SELECT * FROM apps WHERE id = ?').get(id) as any;
         if (!app) {
             return res.status(404).json({ success: false, error: 'Shard not found' });
         }
+
+        // Stop running process
+        await runner.stopShard(app.slug);
 
         // Remove files
         if (app.path && fs.existsSync(app.path)) {
@@ -389,6 +398,10 @@ router.post('/push', upload.single('app'), (req: Request, res: Response) => {
         fs.writeFileSync(envPath, formatToEnv(shard.env_vars));
         console.log(`[CI/CD] RESTORED_.ENV: ${shard.slug} at ${envPath}`);
 
+        // ASYNC RESTART: Trigger reload
+        setTimeout(() => {
+            runner.restartShard(shard.slug).catch(err => console.error(`[CI/CD] Auto-restart failed for ${shard.slug}:`, err));
+        }, 1000);
 
         console.log(`[CI/CD] SUCCESSFULLY_DEPLOYED: ${shard.slug}`);
         
@@ -449,5 +462,42 @@ router.get('/', (req: Request, res: Response) => {
     }
 });
 
+/**
+ * POST /api/shards/:id/restart
+ * Restarts the shard's backend process.
+ */
+router.post('/:id/restart', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const port = await runner.restartShard(shard.slug);
+        res.json({ success: true, message: 'RESTARTED', port });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * GET /api/shards/:id/status
+ * Check if the shard is running and on which port.
+ */
+router.get('/:id/status', (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug, has_backend FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const port = runner.getRunningPort(shard.slug);
+        res.json({ 
+            success: true, 
+            status: port ? 'running' : (shard.has_backend ? 'stopped' : 'no_backend'),
+            port 
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 export default router;

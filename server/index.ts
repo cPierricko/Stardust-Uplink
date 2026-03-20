@@ -11,6 +11,9 @@ import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import deployRoutes from './routes/deploy.js';
 import shardsRoutes, { SHARDS_DIR } from './routes/shards.js';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import runner from './runner.js';
+import db from './db.js';
 
 // Import middleware
 import { requireAuth } from './middleware/auth.js';
@@ -51,6 +54,45 @@ app.use((req: Request, res: Response, next: NextFunction) => {
         } catch (err) {}
     }
     next();
+});
+
+// === SHARD API PROXY ===
+// Redirects /shards/:slug/api/* to the shard's own backend
+app.use('/shards/:slug/api', async (req: Request, res: Response, next: NextFunction) => {
+    const slug = req.params['slug'] as string;
+    const port = runner.getRunningPort(slug);
+
+    if (port) {
+        console.log(`[PROXY] Forwarding to shard ${slug} on port ${port}`);
+        return createProxyMiddleware({
+            target: `http://localhost:${port}`,
+            changeOrigin: true,
+            pathRewrite: {
+                [`^/shards/${slug}/api`]: '', // Strip the prefix when sending to shard
+            }
+        })(req, res, next);
+    }
+    
+    // If not running, try to start it once if it's supposed to have a backend
+    const shard = db.prepare('SELECT has_backend FROM apps WHERE slug = ?').get(slug) as any;
+    if (shard && shard.has_backend) {
+        try {
+            const newPort = await runner.startShard(slug);
+            if (newPort) {
+                return createProxyMiddleware({
+                    target: `http://localhost:${newPort}`,
+                    changeOrigin: true,
+                    pathRewrite: {
+                        [`^/shards/${slug}/api`]: '',
+                    },
+                })(req, res, next);
+            }
+        } catch (err) {
+            console.error(`[PROXY] Failed to start shard ${slug} on demand:`, err);
+        }
+    }
+
+    res.status(503).json({ error: 'Shard backend not running or not found' });
 });
 
 // Shard Static Serving (Manual — bypasses express.static for reliability)

@@ -22,6 +22,24 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
     const [copied, setCopied] = useState(false);
     const [showWorkflow, setShowWorkflow] = useState(false);
     const [workflowCopied, setWorkflowCopied] = useState(false);
+    const [backendStatus, setBackendStatus] = useState<{ status: string; port?: number } | null>(null);
+    const [isRestarting, setIsRestarting] = useState(false);
+
+    const fetchStatus = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/shards/${shard.id}/status`, { credentials: 'include' });
+            const data = await res.json();
+            if (data.success) setBackendStatus({ status: data.status, port: data.port });
+        } catch (err) {
+            console.error('Failed to fetch shard status:', err);
+        }
+    };
+
+    useEffect(() => {
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 5000);
+        return () => clearInterval(interval);
+    }, [shard.id]);
 
     useEffect(() => {
         // Fetch token on mount
@@ -112,6 +130,27 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
         }
     };
 
+    const handleRestart = async () => {
+        setIsRestarting(true);
+        try {
+            const res = await fetch(`${API_BASE}/shards/${shard.id}/restart`, {
+                method: 'POST',
+                credentials: 'include'
+            });
+            const data = await res.json();
+            if (data.success) {
+                showNotification('SHARD_RESTARTED');
+                fetchStatus();
+            } else {
+                showNotification(data.error || 'RESTART_FAILED', 'error');
+            }
+        } catch (err) {
+            showNotification('SYSTEM_ERROR', 'error');
+        } finally {
+            setIsRestarting(false);
+        }
+    };
+
 
     const workflowTemplate = `name: Stardust Shard Deploy
 on:
@@ -196,6 +235,31 @@ ANOTHER_KEY=VALUE"
                     >
                         {isSaving ? 'SYNCING...' : <><Save size={12} /> COMMIT_CHANGES</>}
                     </button>
+                </div>
+
+                {/* Shard Backend Control */}
+                <div className="pt-2 border-t border-cyan-900/20 space-y-2">
+                    <label className="text-[9px] font-mono text-cyan-900 tracking-widest uppercase flex items-center gap-2">
+                        <Cpu size={10} /> SHARD_BACKEND_STATUS
+                    </label>
+                    <div className="flex items-center justify-between p-2 bg-black/40 border border-cyan-900/30">
+                        <div className="flex flex-col">
+                            <span className="text-[10px] font-mono text-cyan-400 flex items-center gap-2 uppercase">
+                                <span className={`w-1.5 h-1.5 rounded-full ${backendStatus?.status === 'running' ? 'bg-[#00d4ff] shadow-neon-cyan' : 'bg-gray-600'}`}></span>
+                                {backendStatus?.status || 'CHECKING...'}
+                            </span>
+                            {backendStatus?.port && (
+                                <span className="text-[8px] text-cyan-800 font-mono">INTERNAL_PORT: {backendStatus.port}</span>
+                            )}
+                        </div>
+                        <button
+                            onClick={handleRestart}
+                            disabled={isRestarting || backendStatus?.status === 'no_backend'}
+                            className="px-3 py-1 border border-cyan-500/40 text-cyan-500 font-mono text-[8px] tracking-widest hover:bg-cyan-500/10 transition-all uppercase disabled:opacity-20"
+                        >
+                            {isRestarting ? 'REBOOTING...' : 'RESTART'}
+                        </button>
+                    </div>
                 </div>
 
 
