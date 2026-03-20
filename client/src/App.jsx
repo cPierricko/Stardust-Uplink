@@ -22,6 +22,8 @@ import AppShard from './components/dashboard/AppShard';
 import AdminModal from './components/admin/AdminModal';
 
 function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
+  const navigate = useNavigate();
+
   return (
     <div className="min-h-screen p-4 md:p-8 flex flex-col items-center relative selection:bg-[#00d4ff]/30 w-full">
       <Header user={user} onAdminOpen={() => setAdminOpen(true)} />
@@ -45,7 +47,7 @@ function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
             <AppShard 
               key={shard.id} 
               shard={shard} 
-              onAccess={(s) => window.location.href = `/${s.slug}`} 
+              onAccess={(s) => navigate(`/${s.slug}`)} 
               onUpdate={fetchShards}
               onDelete={fetchShards}
             />
@@ -63,11 +65,23 @@ function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
   );
 }
 
-function ShardViewer({ shards }) {
+function ShardViewer({ shards, loading }) {
   const { slug } = useParams();
   const shard = shards.find(s => s.slug === slug);
 
   if (!shard) {
+    if (loading) {
+      return (
+        <div className="min-h-screen bg-black flex flex-col items-center justify-center text-[#00d4ff] font-mono tracking-[0.2em] p-4 text-center">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 bg-[#00d4ff] animate-ping" />
+            <div>ESTABLISHING_SECURE_UPLINK...</div>
+          </div>
+          <div className="text-[10px] text-cyan-900 mt-4 animate-pulse">PATH: /mnt/{slug}</div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center text-red-500 font-mono tracking-widest p-4 text-center">
         <div className="text-4xl mb-4">404</div>
@@ -103,16 +117,22 @@ function AppContent() {
   const [loading, setLoading] = useState(true);
   const [adminOpen, setAdminOpen] = useState(false);
   const [shards, setShards] = useState([]);
+  const [shardsLoading, setShardsLoading] = useState(false);
 
   const fetchShards = () => {
+    setShardsLoading(true);
     fetch(`${API_BASE}/shards`, { credentials: 'include' })
       .then(r => r.json())
       .then(res => {
         if (res.success) {
           setShards(res.data);
         }
+        setShardsLoading(false);
       })
-      .catch(err => console.error('Failed to fetch shards:', err));
+      .catch(err => {
+        console.error('Failed to fetch shards:', err);
+        setShardsLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -151,7 +171,7 @@ function AppContent() {
             setAdminOpen={setAdminOpen} 
           />
         } />
-        <Route path="/:slug" element={<ShardViewer shards={shards} />} />
+        <Route path="/:slug" element={<ShardViewer shards={shards} loading={shardsLoading} />} />
       </Routes>
 
       <AnimatePresence>

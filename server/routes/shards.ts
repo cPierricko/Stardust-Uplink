@@ -17,6 +17,35 @@ router.use((req, res, next) => {
     next();
 });
 
+// Helper to parse .env format to JSON string record
+const parseEnvToJSON = (content: string) => {
+    const lines = content.split('\n');
+    const result: Record<string, string> = {};
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const index = trimmed.indexOf('=');
+        if (index > -1) {
+            const key = trimmed.substring(0, index).trim();
+            const value = trimmed.substring(index + 1).trim().replace(/^['"](.*)['"]$/, '$1');
+            if (key) result[key] = value;
+        }
+    }
+    return JSON.stringify(result);
+};
+
+// Helper to convert JSON string/object to .env format
+const formatToEnv = (vars: any) => {
+    if (!vars) return '';
+    try {
+        const obj = typeof vars === 'string' ? JSON.parse(vars) : vars;
+        return Object.entries(obj).map(([k, v]) => `${k}=${v}`).join('\n');
+    } catch {
+        return vars; // Already in .env or other format
+    }
+};
+
+
 // Base directory for apps: auto-detect based on filesystem
 const isProd = process.env['NODE_ENV'] === 'production';
 
@@ -112,6 +141,15 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
                 fs.rmSync(distPath, { recursive: true });
                 console.log(`[SHARDS] Flattened nested 'dist' folder for ${appSlug}`);
             }
+
+            // RE-APPLY ENVIRONMENT VARIABLES: Ensure .env is restored after wipe/extract
+            // If it's an existing shard, we might want to get existing env_vars first
+            const existing = db.prepare('SELECT env_vars FROM apps WHERE slug = ?').get(appSlug) as any;
+            const finalEnvVars = env_vars || (existing ? existing.env_vars : '{}');
+            const envPath = path.join(extractPath, '.env');
+            fs.writeFileSync(envPath, formatToEnv(finalEnvVars));
+            console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${envPath}`);
+
         } else {
             // Initialize EMPTY/SHELL shard
             if (fs.existsSync(extractPath)) {
@@ -235,30 +273,33 @@ router.delete('/:id', (req: Request, res: Response) => {
  */
 router.patch('/:id/env', (req: Request, res: Response) => {
     const { id } = req.params;
-    const { env_vars } = req.body;
+    const { env_vars } = req.body; // Expected to be in .env format string from now on
 
     try {
-        // Validate JSON if it's a string
-        if (typeof env_vars === 'string') {
-            JSON.parse(env_vars);
+        const app = db.prepare('SELECT * FROM apps WHERE id = ?').get(id) as any;
+        if (!app) {
+            return res.status(404).json({ success: false, error: 'Shard not found' });
         }
 
+        // We store it as standard .env text in the database now for consistency
+        // but if it's already JSON we keep it for now and convert to .env for the file
         const stmt = db.prepare('UPDATE apps SET env_vars = ? WHERE id = ?');
-        const result = stmt.run(
-            typeof env_vars === 'string' ? env_vars : JSON.stringify(env_vars),
-            id
-        );
+        stmt.run(env_vars, id);
 
-        if (result.changes === 0) {
-            return res.status(404).json({ success: false, error: 'Shard not found' });
+        // SYNC WITH FILESYSTEM: Write .env file
+        if (app.path && fs.existsSync(app.path)) {
+            const envPath = path.join(app.path, '.env');
+            fs.writeFileSync(envPath, env_vars);
+            console.log(`[SHARDS] SYNCED_.ENV: ${app.slug} at ${envPath}`);
         }
 
         res.json({ success: true, message: 'ENVIRONMENT_UPDATED' });
     } catch (err: any) {
         console.error('[SHARDS] Env update error:', err);
-        res.status(400).json({ success: false, error: 'Invalid environment data' });
+        res.status(400).json({ success: false, error: 'Failed to update environment' });
     }
 });
+
 
 /**
  * GET /api/shards/:id/token
@@ -343,6 +384,12 @@ router.post('/push', upload.single('app'), (req: Request, res: Response) => {
             console.log(`[CI/CD] Flattened nested 'dist' folder for ${shard.slug}`);
         }
 
+        // RE-APPLY ENVIRONMENT VARIABLES: Restore from database after wipe/extract
+        const envPath = path.join(extractPath, '.env');
+        fs.writeFileSync(envPath, formatToEnv(shard.env_vars));
+        console.log(`[CI/CD] RESTORED_.ENV: ${shard.slug} at ${envPath}`);
+
+
         console.log(`[CI/CD] SUCCESSFULLY_DEPLOYED: ${shard.slug}`);
         
         res.json({
@@ -379,12 +426,28 @@ router.post('/push', upload.single('app'), (req: Request, res: Response) => {
 router.get('/', (req: Request, res: Response) => {
     try {
         const stmt = db.prepare('SELECT * FROM apps ORDER BY name ASC');
-        const shards = stmt.all();
-        res.json({ success: true, data: shards });
+        const shards = stmt.all() as any[];
+
+        // Enhance shards with actual .env file content if present
+        const enhancedShards = shards.map(shard => {
+            if (shard.path && fs.existsSync(shard.path)) {
+                const envPath = path.join(shard.path, '.env');
+                if (fs.existsSync(envPath)) {
+                    shard.env_vars = fs.readFileSync(envPath, 'utf8');
+                } else if (shard.env_vars && shard.env_vars.startsWith('{')) {
+                    // Migration: if DB has JSON but no .env file, convert for the frontend
+                    shard.env_vars = formatToEnv(shard.env_vars);
+                }
+            }
+            return shard;
+        });
+
+        res.json({ success: true, data: enhancedShards });
     } catch (err: any) {
         console.error('[SHARDS] List error:', err);
         res.status(500).json({ success: false, error: 'Failed to fetch shards' });
     }
 });
+
 
 export default router;

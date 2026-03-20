@@ -12,7 +12,8 @@ interface ShardSettingsProps {
 }
 
 export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: ShardSettingsProps) {
-    const [envVars, setEnvVars] = useState(shard.env_vars);
+    const [envVars, setEnvVars] = useState(shard.env_vars === '{}' ? '' : shard.env_vars);
+
     const [token, setToken] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -48,14 +49,8 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
     const handleSaveEnv = async () => {
         setIsSaving(true);
         try {
-            // Validate JSON
-            try {
-                JSON.parse(envVars);
-            } catch (e) {
-                showNotification('INVALID_JSON_FORMAT', 'error');
-                setIsSaving(false);
-                return;
-            }
+            // No longer forcing JSON - standard .env format (KEY=VALUE) is accepted
+
 
             const res = await fetch(`${API_BASE}/shards/${shard.id}/env`, {
                 method: 'PATCH',
@@ -188,7 +183,10 @@ jobs:
                     <textarea
                         value={envVars}
                         onChange={(e) => setEnvVars(e.target.value)}
-                        className="w-full h-24 bg-black/40 border border-cyan-900/30 p-2 text-cyan-400 font-mono text-[10px] focus:outline-none focus:border-cyan-500/40 transition-all resize-none"
+                        placeholder="KEY=VALUE
+ANOTHER_KEY=VALUE"
+                        className="w-full h-32 bg-black/40 border border-cyan-900/30 p-2 text-cyan-400 font-mono text-[10px] focus:outline-none focus:border-cyan-500/40 transition-all resize-none"
+
                         spellCheck={false}
                     />
                     <button
