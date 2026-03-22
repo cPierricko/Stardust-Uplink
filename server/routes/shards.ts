@@ -580,12 +580,24 @@ router.delete('/:id/database', async (req: Request, res: Response) => {
         const shard = db.prepare('SELECT slug, path FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        const dbPath = path.join(shard.path, 'sqlite.db');
-        if (fs.existsSync(dbPath)) {
-            // Stop the shard first so we don't have locked database issues
-            await runner.stopShard(shard.slug);
-            fs.unlinkSync(dbPath);
-            await runner.startShard(shard.slug); // Restart without db
+        let wiped = false;
+        const allFiles = fs.readdirSync(shard.path);
+        
+        for (const file of allFiles) {
+            if (file.endsWith('.sqlite') || file.endsWith('.db')) {
+                const pathToCheck = path.join(shard.path, file);
+                if (fs.existsSync(pathToCheck)) {
+                    if (!wiped) {
+                        await runner.stopShard(shard.slug);
+                        wiped = true;
+                    }
+                    fs.unlinkSync(pathToCheck);
+                }
+            }
+        }
+
+        if (wiped) {
+            await runner.startShard(shard.slug);
             return res.json({ success: true, message: 'DATABASE_WIPED_AND_RESTARTED' });
         } else {
             return res.json({ success: true, message: 'NO_DATABASE_FOUND' });
