@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, exec, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import db from './db.js';
@@ -98,8 +98,17 @@ class ShardRunner {
         child.stdout?.on('data', (data) => console.log(`[SHARD:${slug}] ${data}`));
         child.stderr?.on('data', (data) => console.error(`[SHARD:${slug}:ERR] ${data}`));
 
+        // Log to file
+        const logPath = path.join(shardPath, 'logs.txt');
+        const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+        logStream.write(`\n\n--- SERVER START: ${new Date().toISOString()} ---\n`);
+        child.stdout?.pipe(logStream);
+        child.stderr?.pipe(logStream);
+
         child.on('close', (code) => {
             console.log(`[RUNNER] Shard ${slug} exited with code ${code}`);
+            logStream.write(`\n--- SERVER EXITED WITH CODE ${code} ---\n`);
+            logStream.end();
             this.processes.delete(slug);
         });
 
@@ -125,6 +134,40 @@ class ShardRunner {
 
     getRunningPort(slug: string): number | undefined {
         return this.processes.get(slug)?.port;
+    }
+
+    async runCommand(slug: string, command: string): Promise<string> {
+        const shard = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as any;
+        if (!shard || !shard.path) throw new Error(`Shard ${slug} not found or has no path`);
+        
+        const shardPath = shard.path;
+        const logPath = path.join(shardPath, 'logs.txt');
+        
+        // Ensure log file exists
+        if (!fs.existsSync(logPath)) {
+            fs.writeFileSync(logPath, '');
+        }
+
+        return new Promise((resolve, reject) => {
+            fs.appendFileSync(logPath, `\n\n--- EXEC COMMAND: ${command} @ ${new Date().toISOString()} ---\n`);
+            
+            exec(command, { cwd: shardPath }, (error, stdout, stderr) => {
+                if (stdout) {
+                    fs.appendFileSync(logPath, stdout);
+                }
+                if (stderr) {
+                    fs.appendFileSync(logPath, stderr);
+                }
+                
+                if (error) {
+                    fs.appendFileSync(logPath, `\n--- EXEC FAILED: ${error.message} ---\n`);
+                    return reject(new Error(stderr || error.message));
+                }
+                
+                fs.appendFileSync(logPath, `\n--- EXEC SUCCESS ---\n`);
+                resolve(stdout);
+            });
+        });
     }
 }
 
