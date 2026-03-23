@@ -242,8 +242,30 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
         } catch { showNotification('SYSTEM_ERROR', 'error'); }
     };
 
+    const [workflowType, setWorkflowType] = useState<'frontend' | 'fullstack'>(shard.has_backend ? 'fullstack' : 'frontend');
 
-    const workflowTemplate = `name: Stardust Shard Deploy
+    const workflowFrontend = `name: Stardust Deploy — Frontend
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - name: Push to Stardust
+        run: |
+          cd dist && zip -r ../deploy.zip . && cd ..
+          curl -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+            -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
+            -F "app=@deploy.zip"`;
+
+    const workflowFullstack = `name: Stardust Deploy — Full-Stack
 on:
   push:
     branches: [ main ]
@@ -257,14 +279,14 @@ jobs:
           node-version: '20'
       - run: npm ci
       - run: npm run build --if-present
-      - name: Install Production Only Dependencies (for Zip)
-        run: npm prune --omit=dev
-      - name: Package & Push
+      - name: Push to Stardust
         run: |
-          zip -r deploy.zip . -x ".git/*" ".github/*" "src/*"
+          zip -r deploy.zip . -x ".git/*" ".github/*" "node_modules/*" "src/*"
           curl -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
             -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
             -F "app=@deploy.zip"`;
+
+    const workflowTemplate = workflowType === 'frontend' ? workflowFrontend : workflowFullstack;
 
     const copyWorkflow = () => {
         navigator.clipboard.writeText(workflowTemplate);
@@ -522,11 +544,31 @@ ANOTHER_KEY=VALUE"
                                     </div>
 
                                     <div className="space-y-2 pt-2 border-t border-cyan-900/20">
+                                        {/* Template type toggle */}
+                                        <div className="flex gap-1">
+                                            <button
+                                                onClick={() => setWorkflowType('frontend')}
+                                                className={`flex-1 py-1 font-mono text-[8px] tracking-widest border transition-all uppercase ${workflowType === 'frontend' ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400' : 'border-cyan-900/30 text-cyan-800 hover:text-cyan-600'}`}
+                                            >
+                                                Frontend Only
+                                            </button>
+                                            <button
+                                                onClick={() => setWorkflowType('fullstack')}
+                                                className={`flex-1 py-1 font-mono text-[8px] tracking-widest border transition-all uppercase ${workflowType === 'fullstack' ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400' : 'border-cyan-900/30 text-cyan-800 hover:text-cyan-600'}`}
+                                            >
+                                                Full-Stack
+                                            </button>
+                                        </div>
+                                        <p className="text-[7px] text-cyan-900 font-mono">
+                                            {workflowType === 'frontend'
+                                                ? '→ Zips dist/ only. Requires npm run build in your project.'
+                                                : '→ Zips all files (no node_modules). Stardust runs npm install server-side.'}
+                                        </p>
                                         <p className="text-[8px] text-cyan-800 leading-relaxed font-mono">
                                             WORKFLOW_FILE_PATH: <br/>
                                             <span className="text-cyan-600">.github/workflows/deploy.yml</span>
                                         </p>
-                                        <pre className="p-2 bg-black/60 text-[7px] text-cyan-400 font-mono overflow-x-auto custom-scrollbar border border-cyan-900/20 leading-tight h-24">
+                                        <pre className="p-2 bg-black/60 text-[7px] text-cyan-400 font-mono overflow-x-auto custom-scrollbar border border-cyan-900/20 leading-tight h-36">
                                             {workflowTemplate}
                                         </pre>
                                         <button
