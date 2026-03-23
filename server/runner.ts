@@ -13,11 +13,15 @@ const shardsStorageDir = path.join(process.cwd(), 'shards_storage');
 
 class ShardRunner {
     private processes: Map<string, ShardProcess> = new Map();
+    private startingPromises: Map<string, Promise<number>> = new Map();
     private startPort = 4000;
 
     constructor() {
         // Automatically restart shards that should have a backend on startup
-        setTimeout(() => this.resurrectShards(), 2000);
+        // BUT: Don't do this during tests to avoid port conflicts and race conditions!
+        if (process.env.NODE_ENV !== 'test') {
+            setTimeout(() => this.resurrectShards(), 2000);
+        }
     }
 
     private async resurrectShards() {
@@ -54,16 +58,32 @@ class ShardRunner {
     }
 
     async startShard(slug: string): Promise<number> {
-        // If already starting or running, return existing port
+        // If already being started, return the current start promise
+        const currentP = this.startingPromises.get(slug);
+        if (currentP) return currentP;
+
+        // If already running, return its port
         const existingPort = this.getRunningPort(slug);
         if (existingPort) return existingPort;
         
+        const startPromise = this._internalStart(slug);
+        this.startingPromises.set(slug, startPromise);
+        try {
+            return await startPromise;
+        } finally {
+            this.startingPromises.delete(slug);
+        }
+    }
+
+    private _internalStart(slug: string): Promise<number> {
         const shard = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as any;
         if (!shard) throw new Error(`Shard ${slug} not found`);
 
         const shardPath = path.resolve(shardsStorageDir, slug);
         let entryPoint = '';
-        if (fs.existsSync(path.join(shardPath, 'server.js'))) entryPoint = 'server.js';
+        if (fs.existsSync(path.join(shardPath, 'server.cjs'))) entryPoint = 'server.cjs';
+        else if (fs.existsSync(path.join(shardPath, 'server.js'))) entryPoint = 'server.js';
+        else if (fs.existsSync(path.join(shardPath, 'index.cjs'))) entryPoint = 'index.cjs';
         else if (fs.existsSync(path.join(shardPath, 'index.js'))) entryPoint = 'index.js';
         else if (fs.existsSync(path.join(shardPath, 'server.ts'))) entryPoint = 'server.ts';
         else if (fs.existsSync(path.join(shardPath, 'index.ts'))) entryPoint = 'index.ts';
@@ -71,7 +91,7 @@ class ShardRunner {
         if (!entryPoint) {
             console.log(`[RUNNER] No backend entry point found for ${slug}`);
             db.prepare('UPDATE apps SET has_backend = 0 WHERE slug = ?').run(slug);
-            return 0;
+            return Promise.resolve(0);
         }
 
         const port = shard.assigned_port || this.findAvailablePort();
@@ -109,7 +129,7 @@ class ShardRunner {
             const timeout = setTimeout(() => {
                 console.log(`[RUNNER] Timeout waiting for shard ${slug} to start`);
                 resolve(port); // Resolve anyway to allow proxy attempts
-            }, 15000);
+            }, 10000);
 
             const logPath = path.join(shardPath, 'logs.txt');
             const logStream = fs.createWriteStream(logPath, { flags: 'a' });
@@ -121,7 +141,8 @@ class ShardRunner {
             child.stdout?.on('data', (data) => {
                 const output = data.toString();
                 process.stdout.write(`[SHARD:${slug}] ${output}`);
-                if (output.includes('Server active on port') || output.includes('Listening on')) {
+                const lower = output.toLowerCase();
+                if (lower.includes('server active on port') || lower.includes('listening on')) {
                     clearTimeout(timeout);
                     this.processes.set(slug, { process: child, port, slug });
                     resolve(port);

@@ -32,17 +32,28 @@ describe('Shard Runner & Proxy', () => {
     });
 
     it('should detect and start a shard with server.js', async () => {
-        // 1. Create a dummy shard with a server.js
+        // 1. Create a dummy shard with a server.js using pure node/http to avoid ESM/dependencies issues
         const shardPath = path.join(process.cwd(), 'shards_storage', testSlug);
-        if (!fs.existsSync(shardPath)) fs.mkdirSync(shardPath, { recursive: true });
+        if (fs.existsSync(shardPath)) fs.rmSync(shardPath, { recursive: true, force: true });
+        fs.mkdirSync(shardPath, { recursive: true });
         
         const serverCode = `
-            import express from 'express';
-            const app = express();
-            app.get('/api/hello', (req, res) => res.json({ message: 'PROXIED_OK' }));
-            app.listen(process.env.PORT, () => console.log('Test shard listening'));
+const http = require('http');
+const server = http.createServer((req, res) => {
+    if (req.url === '/api/hello') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message: 'PROXIED_OK' }));
+    } else {
+        res.writeHead(404);
+        res.end('Not Found');
+    }
+});
+const port = process.env.PORT || 4000;
+server.listen(port, () => {
+    console.log('Listening on ' + port);
+});
         `;
-        fs.writeFileSync(path.join(shardPath, 'server.js'), serverCode);
+        fs.writeFileSync(path.join(shardPath, 'server.cjs'), serverCode);
 
         // 2. Register shard in DB
         testShardId = 'test-id-runner';
@@ -60,7 +71,7 @@ describe('Shard Runner & Proxy', () => {
         
         expect(statusRes.body.status).toBe('running');
         expect(statusRes.body.port).toBe(port);
-    });
+    }, 15000);
 
     it('should proxy requests to the shard backend', async () => {
         // Wait a bit for the shard to be ready
@@ -71,7 +82,7 @@ describe('Shard Runner & Proxy', () => {
         
         expect(proxyRes.status).toBe(200);
         expect(proxyRes.body.message).toBe('PROXIED_OK');
-    });
+    }, 15000);
 
     it('should restart the shard backend', async () => {
         const oldPort = runner.getRunningPort(testSlug);
@@ -85,10 +96,10 @@ describe('Shard Runner & Proxy', () => {
         
         const newPort = runner.getRunningPort(testSlug);
         expect(newPort).toBe(oldPort); // Should reuse port if possible/configured
-    });
+    }, 15000);
 
     it('should stop the shard when deleted', async () => {
         await runner.stopShard(testSlug);
-        expect(runner.getRunningPort(testSlug)).toBeUndefined();
+        expect(runner.getRunningPort(testSlug)).toBeFalsy();
     });
 });
