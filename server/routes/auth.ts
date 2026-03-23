@@ -207,10 +207,12 @@ router.post('/verify-registration', async (req: Request, res: Response) => {
             stmtUpd.run(user.id);
 
             const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, jwtSecret, { expiresIn: '7d' });
+            const { RP_ID } = getRPConfig(req);
             res.cookie('jwt', token, {
                 httpOnly: true,
                 secure: process.env['NODE_ENV'] === 'production',
-                sameSite: 'strict'
+                sameSite: 'lax',
+                domain: RP_ID === 'localhost' ? undefined : `.${RP_ID}`
             });
 
             // Cleanup the setup token ONLY now that we have a working admin
@@ -262,10 +264,12 @@ router.post('/verify-authentication', async (req: Request, res: Response) => {
             stmtUpd.run(verification.authenticationInfo.newCounter, credential.id);
 
             const token = jwt.sign({ id: credential.user_id, username: credential.username, role: credential.role }, jwtSecret, { expiresIn: '7d' });
+            const { RP_ID } = getRPConfig(req);
             res.cookie('jwt', token, {
                 httpOnly: true,
                 secure: process.env['NODE_ENV'] === 'production',
-                sameSite: 'strict'
+                sameSite: 'lax',
+                domain: RP_ID === 'localhost' ? undefined : `.${RP_ID}`
             });
             res.json({ verified: true });
         } else {

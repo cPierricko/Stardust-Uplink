@@ -47,6 +47,12 @@ const formatToEnv = (vars: any) => {
     }
 };
 
+// Helper to detect if a shard has a backend entry point
+const detectBackend = (shardPath: string) => {
+    const entries = ['server.cjs', 'server.js', 'index.cjs', 'index.js', 'server.ts', 'index.ts'];
+    return entries.some(e => fs.existsSync(path.join(shardPath, e)));
+};
+
 
 // Base directory for apps: auto-detect based on filesystem
 const isProd = process.env['NODE_ENV'] === 'production';
@@ -200,30 +206,40 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             console.log(`[SHARDS] Initialized shell shard: ${appSlug}`);
         }
 
-        // Generate Server-Side Token
-        const api_token = crypto.randomUUID();
-
         // Save to Database
-        const id = crypto.randomUUID();
+        // Detect if it has a backend after extraction
+        const has_backend = detectBackend(extractPath) ? 1 : 0;
+        
+        const existing = db.prepare('SELECT id, api_token, assigned_port FROM apps WHERE slug = ?').get(appSlug) as any;
+        const api_token = existing ? existing.api_token : crypto.randomUUID();
+        const finalId = existing ? existing.id : crypto.randomUUID();
+
         const stmt = db.prepare(`
-            INSERT OR REPLACE INTO apps (id, name, slug, deploy_method, api_token, env_vars, path)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO apps (id, name, slug, deploy_method, api_token, env_vars, path, has_backend, assigned_port)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(slug) DO UPDATE SET
+                name = excluded.name,
+                deploy_method = excluded.deploy_method,
+                path = excluded.path,
+                has_backend = excluded.has_backend
         `);
 
         stmt.run(
-            id,
+            finalId,
             name || appSlug,
             appSlug,
             deploy_method || 'manual',
             api_token,
             env_vars || '{}',
-            extractPath
+            extractPath,
+            has_backend,
+            existing ? existing.assigned_port : null
         );
 
         res.json({
             success: true,
             data: {
-                id,
+                id: finalId,
                 slug: appSlug,
                 url: `/shards/${appSlug}`,
                 api_token // Return it once for the user to copy
@@ -433,6 +449,10 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
                 });
             });
         }
+        
+        // Re-detect backend in case it changed
+        const has_backend = detectBackend(extractPath) ? 1 : 0;
+        db.prepare('UPDATE apps SET has_backend = ? WHERE slug = ?').run(has_backend, shard.slug);
 
         // ASYNC RESTART: Trigger reload
         setTimeout(() => {
