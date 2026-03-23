@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { exec } from 'child_process';
 import db from '../db.js';
 import runner from '../runner.js';
+import { SHARDS_DIR as PATHS_SHARDS_DIR } from '../config/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,14 +57,10 @@ const detectBackend = (shardPath: string) => {
 };
 
 
-// Base directory for apps: auto-detect based on filesystem
+// Base directory for apps: use shared path config
 const isProd = process.env['NODE_ENV'] === 'production';
 
-// Auto-detect SHARDS_DIR: check production path first, fallback to dev
-const prodShardsPath = path.resolve(process.cwd(), '../storage/apps');
-const devShardsPath = path.resolve(process.cwd(), 'shards_storage');
-
-export const SHARDS_DIR = fs.existsSync(prodShardsPath) ? prodShardsPath : devShardsPath;
+export const SHARDS_DIR = PATHS_SHARDS_DIR;
 
 const TEMP_DIR = isProd 
     ? '/tmp/stardust-shards'
@@ -71,8 +68,6 @@ const TEMP_DIR = isProd
 
 console.log(`[SHARDS_INIT] NODE_ENV=${process.env['NODE_ENV']}, CWD=${process.cwd()}`);
 console.log(`[SHARDS_INIT] SHARDS_DIR=${SHARDS_DIR} (exists: ${fs.existsSync(SHARDS_DIR)})`);
-console.log(`[SHARDS_INIT] Checked prod path: ${prodShardsPath} (exists: ${fs.existsSync(prodShardsPath)})`);
-console.log(`[SHARDS_INIT] Checked dev path: ${devShardsPath} (exists: ${fs.existsSync(devShardsPath)})`);
 
 // Helper to ensure critical directories exist
 const ensureDirs = () => {
