@@ -17,6 +17,8 @@ import db from './db.js';
 
 // Import middleware
 import { requireAuth } from './middleware/auth.js';
+import jwt from 'jsonwebtoken';
+import { jwtSecret } from './config/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,10 +58,36 @@ app.use((req, res, next) => {
     next();
 });
 
+// Helper to redirect to login or send 401
+const requireShardAuth = async (req: Request, res: Response, next: NextFunction) => {
+    // The 'stardust' shard is the management interface and handles its own auth/setup
+    if (req.params['slug'] === 'stardust') return next();
+
+    const token = req.cookies.jwt;
+    if (!token) {
+        if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Auth required' });
+        const host = req.get('host') || '';
+        const isLocal = host.includes('localhost');
+        const loginUrl = isLocal ? 'http://localhost:3000/login' : 'https://stardust.rogue-one.cloud/login';
+        return res.redirect(loginUrl);
+    }
+
+    try {
+        jwt.verify(token, jwtSecret);
+        next();
+    } catch (err) {
+        if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Invalid token' });
+        const host = req.get('host') || '';
+        const isLocal = host.includes('localhost');
+        const loginUrl = isLocal ? 'http://localhost:3000/login' : 'https://stardust.rogue-one.cloud/login';
+        return res.redirect(loginUrl);
+    }
+};
+
 // === SHARD API PROXY ===
 // Redirects /shards/:slug/api/* to the shard's own backend
 // IMPORTANT: This proxy MUST run BEFORE express.json() parses the body, otherwise the stream is silently consumed!
-app.use('/shards/:slug', async (req: Request, res: Response, next: NextFunction) => {
+app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, next: NextFunction) => {
     // Only intercept API requests
     if (!req.url.startsWith('/api')) {
         return next();
@@ -101,13 +129,14 @@ app.use('/shards/:slug', async (req: Request, res: Response, next: NextFunction)
 app.use(express.json());
 app.use(cookieParser());
 
-// Shard Static Serving
-app.use('/shards', async (req: Request, res: Response, next: NextFunction) => {
+app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, next: NextFunction) => {
+    const slug = req.params['slug'] as string;
     const reqPath = decodeURIComponent(req.path).replace(/^\//, '');
-    const fullPath = path.join(SHARDS_DIR, reqPath);
+    const fullPath = path.join(SHARDS_DIR, slug, reqPath);
     
-    // Sécurité: empêcher la traversée de répertoire
-    if (fullPath.indexOf(SHARDS_DIR) !== 0) {
+    // Security check: ensure path is still within SHARDS_DIR/slug
+    const shardBasePath = path.join(SHARDS_DIR, slug);
+    if (fullPath.indexOf(shardBasePath) !== 0) {
         return res.status(403).send('Forbidden');
     }
 
@@ -133,16 +162,12 @@ app.use('/shards', async (req: Request, res: Response, next: NextFunction) => {
             const isAsset = /\.(js|css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|ico|webmanifest)$/.test(req.path) || req.path.startsWith('/assets/');
             
             if (!isAsset) {
-                // Extract the slug (first folder in the requested path)
-                const slugMatch = req.path.match(/^\/([^/]+)/);
-                if (slugMatch) {
-                    const slug = slugMatch[1];
-                    const shardIndexPath = path.join(SHARDS_DIR, slug, 'index.html');
-                    const indexStat = await fs.promises.stat(shardIndexPath).catch(() => null);
-                    
-                    if (indexStat && indexStat.isFile()) {
-                        return res.sendFile(shardIndexPath);
-                    }
+                // Use the slug from the mount point
+                const shardIndexPath = path.join(SHARDS_DIR, slug, 'index.html');
+                const indexStat = await fs.promises.stat(shardIndexPath).catch(() => null);
+                
+                if (indexStat && indexStat.isFile()) {
+                    return res.sendFile(shardIndexPath);
                 }
             }
         }
