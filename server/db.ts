@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 // Database path relative to project root
 const dbPath = path.resolve(process.cwd(), 'db.sqlite');
 
-const db = new Database(dbPath, { verbose: console.log });
+const db = new Database(dbPath);
 
 // Initialize tables
 db.exec(`

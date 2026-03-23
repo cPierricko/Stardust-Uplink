@@ -17,7 +17,7 @@ cd ..
 
 # 3. On copie le Backend (Server) sans les node_modules
 echo "⚙️ Copie du Backend..."
-rsync -av --exclude='node_modules' --exclude='.env' --exclude='shards_storage' server/ .shard-build/
+rsync -av --exclude='node_modules' --exclude='.env' --exclude='shards_storage' --exclude='db.sqlite' server/ .shard-build/
 
 # 4. On crée le fichier .zip final
 echo "🗜️ Création du fichier deploy.zip..."
