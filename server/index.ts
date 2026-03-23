@@ -69,7 +69,8 @@ app.use('/shards/:slug', async (req: Request, res: Response, next: NextFunction)
         console.log(`[PROXY] Forwarding to shard ${slug} on port ${port}`);
         return createProxyMiddleware({
             target: `http://localhost:${port}`,
-            changeOrigin: true
+            changeOrigin: true,
+            pathRewrite: (path, req) => path.replace(new RegExp(`^/shards/${slug}`), '')
         })(req, res, next);
     }
     
@@ -81,7 +82,8 @@ app.use('/shards/:slug', async (req: Request, res: Response, next: NextFunction)
             if (newPort) {
                 return createProxyMiddleware({
                     target: `http://localhost:${newPort}`,
-                    changeOrigin: true
+                    changeOrigin: true,
+                    pathRewrite: (path, req) => path.replace(new RegExp(`^/shards/${slug}`), '')
                 })(req, res, next);
             }
         } catch (err) {
