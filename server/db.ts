@@ -91,10 +91,10 @@ if (!columnNames.includes('assigned_port')) {
 
 // First-Boot Logic
 function runFirstBootCheck() {
-  const stmt = db.prepare('SELECT COUNT(*) as count FROM users');
-  const userCountRow = stmt.get() as { count: number };
+  const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');
+  const countRow = stmt.get() as { count: number };
 
-  if (userCountRow.count === 0) {
+  if (countRow.count === 0) {
     const setupToken = crypto.randomBytes(32).toString('hex');
     console.log('\n======================================================');
     console.log('⚠️  SECURITY WARNING: FIRST-BOOT SETUP TOKEN GENERATED  ⚠️');
