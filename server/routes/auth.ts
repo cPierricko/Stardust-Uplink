@@ -20,17 +20,19 @@ const RP_NAME = 'Rogue One App Center';
 
 const getRPConfig = (req: Request) => {
     const isProd = process.env['NODE_ENV'] === 'production';
-    let ORIGIN = isProd ? 'https://rogue-one.cloud' : 'http://localhost:5173';
-    let RP_ID = isProd ? 'rogue-one.cloud' : 'localhost';
+    const baseDomain = isProd ? 'rogue-one.cloud' : 'localhost';
     
-    const originHeader = req.get('origin') || req.get('referer');
-    if (originHeader) {
-        try {
-            const url = new URL(originHeader);
-            ORIGIN = url.origin;
-            RP_ID = url.hostname;
-        } catch (e) {}
+    // Default to the actual request origin (trusted via 'trust proxy')
+    let ORIGIN = `${req.protocol}://${req.hostname}${req.get('host')?.includes(':') ? ':' + req.get('host')?.split(':')[1] : ''}`;
+    
+    // In local dev, Vite is on 5173
+    if (!isProd && (req.get('origin')?.includes(':5173') || req.get('referer')?.includes(':5173'))) {
+        ORIGIN = 'http://localhost:5173';
     }
+
+    // We use the base domain as the RP_ID. 
+    // This allow Passkeys to work across ALL subdomains ([slug].rogue-one.cloud).
+    const RP_ID = baseDomain;
     
     return { ORIGIN, RP_ID };
 };
