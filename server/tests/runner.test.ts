@@ -78,7 +78,8 @@ server.listen(port, () => {
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         const proxyRes = await request(app)
-            .get(`/shards/${testSlug}/api/hello`);
+            .get(`/shards/${testSlug}/api/hello`)
+            .set('Cookie', [`jwt=${adminToken}`]);
         
         expect(proxyRes.status).toBe(200);
         expect(proxyRes.body.message).toBe('PROXIED_OK');

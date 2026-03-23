@@ -31,6 +31,7 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser());
 
 // Global request logger & SUBDOMAINS INTERCEPTOR
 app.use((req, res, next) => {
@@ -59,11 +60,11 @@ app.use((req, res, next) => {
 });
 
 // Helper to redirect to login or send 401
-const requireShardAuth = async (req: Request, res: Response, next: NextFunction) => {
+const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
     // The 'stardust' shard is the management interface and handles its own auth/setup
     if (req.params['slug'] === 'stardust') return next();
 
-    const token = req.cookies.jwt;
+    const token = req.cookies?.jwt;
     if (!token) {
         if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Auth required' });
         const host = req.get('host') || '';
@@ -127,7 +128,6 @@ app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, n
 
 // Parsers for Stardust's own API
 app.use(express.json());
-app.use(cookieParser());
 
 app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, next: NextFunction) => {
     const slug = req.params['slug'] as string;
