@@ -9,6 +9,8 @@ interface ShardProcess {
     slug: string;
 }
 
+const shardsStorageDir = path.join(process.cwd(), 'shards_storage');
+
 class ShardRunner {
     private processes: Map<string, ShardProcess> = new Map();
     private startPort = 4000;
@@ -23,9 +25,12 @@ class ShardRunner {
         const shards = db.prepare('SELECT * FROM apps WHERE has_backend = 1').all() as any[];
         for (const shard of shards) {
             try {
-                await this.startShard(shard.slug);
+                // Don't await here to avoid blocking Master startup if one shard is slow
+                this.startShard(shard.slug).catch(err => {
+                    console.error(`[RUNNER] Failed to resurrect shard ${shard.slug}:`, err);
+                });
             } catch (err) {
-                console.error(`[RUNNER] Failed to resurrect shard ${shard.slug}:`, err);
+                console.error(`[RUNNER] Error during resurrection call for ${shard.slug}:`, err);
             }
         }
     }
@@ -44,19 +49,20 @@ class ShardRunner {
         return port;
     }
 
+    public getRunningPort(slug: string): number | null {
+        return this.processes.get(slug)?.port || null;
+    }
+
     async startShard(slug: string): Promise<number> {
-        if (this.processes.has(slug)) {
-            console.log(`[RUNNER] Shard ${slug} already running on port ${this.processes.get(slug)!.port}`);
-            return this.processes.get(slug)!.port;
-        }
-
-        const shard = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as any;
-        if (!shard || !shard.path) throw new Error(`Shard ${slug} not found or has no path`);
-
-        const shardPath = shard.path;
-        let entryPoint = '';
+        // If already starting or running, return existing port
+        const existingPort = this.getRunningPort(slug);
+        if (existingPort) return existingPort;
         
-        // Detection logic
+        const shard = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as any;
+        if (!shard) throw new Error(`Shard ${slug} not found`);
+
+        const shardPath = path.resolve(shardsStorageDir, slug);
+        let entryPoint = '';
         if (fs.existsSync(path.join(shardPath, 'server.js'))) entryPoint = 'server.js';
         else if (fs.existsSync(path.join(shardPath, 'index.js'))) entryPoint = 'index.js';
         else if (fs.existsSync(path.join(shardPath, 'server.ts'))) entryPoint = 'server.ts';
@@ -84,8 +90,6 @@ class ShardRunner {
             SHARD_PATH: shardPath
         };
 
-        // Spawn process
-        // Use tsx if it's a .ts file, node otherwise
         const cmd = entryPoint.endsWith('.ts') ? 'npx' : 'node';
         const args = entryPoint.endsWith('.ts') ? ['tsx', entryPoint] : [entryPoint];
 
@@ -95,32 +99,52 @@ class ShardRunner {
             stdio: 'pipe'
         });
 
-        // Ensure child process is killed if the main server restarts (prevents EADDRINUSE / orphans)
+        // Cleanup on exit
         const cleanup = () => { try { child.kill(); } catch(e) {} };
         process.on('exit', cleanup);
         process.on('SIGINT', cleanup);
-        process.on('SIGTERM', cleanup);
-        process.on('SIGUSR2', cleanup); // Used by tsx watch / nodemon
+        process.on('SIGUSR2', cleanup); // For nodemon
 
-        child.stdout?.on('data', (data) => console.log(`[SHARD:${slug}] ${data}`));
-        child.stderr?.on('data', (data) => console.error(`[SHARD:${slug}:ERR] ${data}`));
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                console.log(`[RUNNER] Timeout waiting for shard ${slug} to start`);
+                resolve(port); // Resolve anyway to allow proxy attempts
+            }, 15000);
 
-        // Log to file
-        const logPath = path.join(shardPath, 'logs.txt');
-        const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-        logStream.write(`\n\n--- SERVER START: ${new Date().toISOString()} ---\n`);
-        child.stdout?.pipe(logStream, { end: false });
-        child.stderr?.pipe(logStream, { end: false });
+            const logPath = path.join(shardPath, 'logs.txt');
+            const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+            logStream.write(`\n\n--- SERVER START: ${new Date().toISOString()} ---\n`);
+            child.stdout?.pipe(logStream, { end: false });
+            child.stderr?.pipe(logStream, { end: false });
 
-        child.on('close', (code) => {
-            console.log(`[RUNNER] Shard ${slug} exited with code ${code}`);
-            logStream.write(`\n--- SERVER EXITED WITH CODE ${code} ---\n`);
-            logStream.end();
-            this.processes.delete(slug);
+            // Also log to Master terminal
+            child.stdout?.on('data', (data) => {
+                const output = data.toString();
+                process.stdout.write(`[SHARD:${slug}] ${output}`);
+                if (output.includes('Server active on port') || output.includes('Listening on')) {
+                    clearTimeout(timeout);
+                    this.processes.set(slug, { process: child, port, slug });
+                    resolve(port);
+                }
+            });
+            child.stderr?.on('data', (data) => {
+                process.stderr.write(`[SHARD:${slug}:ERR] ${data.toString()}`);
+            });
+
+            child.on('error', (err) => {
+                clearTimeout(timeout);
+                console.error(`[RUNNER] Failed to start shard ${slug}:`, err);
+                reject(err);
+            });
+
+            child.on('close', (code) => {
+                clearTimeout(timeout);
+                console.log(`[RUNNER] Shard ${slug} exited with code ${code}`);
+                logStream.write(`\n--- SERVER EXITED WITH CODE ${code} ---\n`);
+                logStream.end();
+                this.processes.delete(slug);
+            });
         });
-
-        this.processes.set(slug, { process: child, port, slug });
-        return port;
     }
 
     async stopShard(slug: string) {
@@ -135,36 +159,23 @@ class ShardRunner {
     async restartShard(slug: string): Promise<number> {
         await this.stopShard(slug);
         // Wait a bit for the port to be released
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         return this.startShard(slug);
-    }
-
-    getRunningPort(slug: string): number | undefined {
-        return this.processes.get(slug)?.port;
     }
 
     async runCommand(slug: string, command: string): Promise<string> {
         const shard = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as any;
-        if (!shard || !shard.path) throw new Error(`Shard ${slug} not found or has no path`);
+        if (!shard) throw new Error(`Shard ${slug} not found`);
         
-        const shardPath = shard.path;
+        const shardPath = path.resolve(shardsStorageDir, slug);
         const logPath = path.join(shardPath, 'logs.txt');
         
-        // Ensure log file exists
-        if (!fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, '');
-        }
-
         return new Promise((resolve, reject) => {
             fs.appendFileSync(logPath, `\n\n--- EXEC COMMAND: ${command} @ ${new Date().toISOString()} ---\n`);
             
             exec(command, { cwd: shardPath }, (error, stdout, stderr) => {
-                if (stdout) {
-                    fs.appendFileSync(logPath, stdout);
-                }
-                if (stderr) {
-                    fs.appendFileSync(logPath, stderr);
-                }
+                if (stdout) fs.appendFileSync(logPath, stdout);
+                if (stderr) fs.appendFileSync(logPath, stderr);
                 
                 if (error) {
                     fs.appendFileSync(logPath, `\n--- EXEC FAILED: ${error.message} ---\n`);
