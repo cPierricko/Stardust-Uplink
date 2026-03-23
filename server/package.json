@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch index.ts",
+    "dev": "tsx watch --ignore \"shards_storage/**\" --ignore \"*.sqlite\" --ignore \"*.db\" index.ts",
     "build": "tsc",
     "start": "tsx index.ts",
     "test": "vitest run",

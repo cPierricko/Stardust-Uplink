@@ -47,7 +47,19 @@ function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
             <AppShard 
               key={shard.id} 
               shard={shard} 
-              onAccess={(s) => navigate(`/${s.slug}`)} 
+              onAccess={(s) => {
+                const protocol = window.location.protocol;
+                const hostname = window.location.hostname;
+                const port = window.location.port === '5173' ? ':3000' : (window.location.port ? `:${window.location.port}` : '');
+                
+                if (hostname.includes('localhost') || hostname === '127.0.0.1') {
+                    window.location.href = `${protocol}//${s.slug}.localhost${port}/`;
+                } else if (hostname.includes('rogue-one.cloud')) {
+                    window.location.href = `${protocol}//${s.slug}.rogue-one.cloud${port}/`;
+                } else {
+                    window.location.href = `${protocol}//${s.slug}.${hostname}${port}/`;
+                }
+              }} 
               onUpdate={fetchShards}
               onDelete={fetchShards}
             />
@@ -65,47 +77,7 @@ function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
   );
 }
 
-function ShardViewer({ shards, loading }) {
-  const { slug } = useParams();
-  const shard = shards.find(s => s.slug === slug);
 
-  if (!shard) {
-    if (loading) {
-      return (
-        <div className="min-h-screen bg-black flex flex-col items-center justify-center text-[#00d4ff] font-mono tracking-[0.2em] p-4 text-center">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 bg-[#00d4ff] animate-ping" />
-            <div>ESTABLISHING_SECURE_UPLINK...</div>
-          </div>
-          <div className="text-[10px] text-cyan-900 mt-4 animate-pulse">PATH: /mnt/{slug}</div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-red-500 font-mono tracking-widest p-4 text-center">
-        <div className="text-4xl mb-4">404</div>
-        <div>UPLINK_FAILURE: SHARD_NOT_FOUND [{slug?.toUpperCase()}]</div>
-        <button 
-          onClick={() => window.location.href = '/'}
-          className="mt-8 px-6 py-2 border border-red-500/50 hover:bg-red-500/20 transition-all text-[10px]"
-        >
-          RETURN_TO_STARDUST
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 z-[9999] bg-black overflow-hidden">
-      <iframe 
-        src={`${window.location.origin}/shards/${shard.slug}/`} 
-        className="w-full h-full border-none"
-        title={shard.name}
-      />
-    </div>
-  );
-}
 
 function AppContent() {
   const [searchParams] = useSearchParams();
@@ -171,7 +143,6 @@ function AppContent() {
             setAdminOpen={setAdminOpen} 
           />
         } />
-        <Route path="/:slug" element={<ShardViewer shards={shards} loading={shardsLoading} />} />
       </Routes>
 
       <AnimatePresence>

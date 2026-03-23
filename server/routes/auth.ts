@@ -16,10 +16,24 @@ import { User, AuthStatus } from '../../shared/types.js';
 const router = express.Router();
 
 // RP Configuration
-const isProd = process.env['NODE_ENV'] === 'production';
-const RP_ID = isProd ? 'rogue-one.cloud' : 'localhost';
-const ORIGIN = isProd ? 'https://rogue-one.cloud' : 'http://localhost:5173';
 const RP_NAME = 'Rogue One App Center';
+
+const getRPConfig = (req: Request) => {
+    const isProd = process.env['NODE_ENV'] === 'production';
+    let ORIGIN = isProd ? 'https://rogue-one.cloud' : 'http://localhost:5173';
+    let RP_ID = isProd ? 'rogue-one.cloud' : 'localhost';
+    
+    const originHeader = req.get('origin') || req.get('referer');
+    if (originHeader) {
+        try {
+            const url = new URL(originHeader);
+            ORIGIN = url.origin;
+            RP_ID = url.hostname;
+        } catch (e) {}
+    }
+    
+    return { ORIGIN, RP_ID };
+};
 
 // Store for authentication challenges (in-memory for simple implementation)
 const authChallenges: Record<string, number> = {};
@@ -128,6 +142,8 @@ router.post('/generate-registration-options', async (req: Request, res: Response
             type: 'public-key' as const,
         }));
 
+        const { ORIGIN, RP_ID } = getRPConfig(req);
+
         const options = await generateRegistrationOptions({
             rpName: RP_NAME,
             rpID: RP_ID,
@@ -156,6 +172,8 @@ router.post('/verify-registration', async (req: Request, res: Response) => {
     if (!user || !user.currentChallenge) return res.status(400).json({ error: 'Configuration Error' });
 
     try {
+        const { ORIGIN, RP_ID } = getRPConfig(req);
+
         const verification: VerifiedRegistrationResponse = await verifyRegistrationResponse({
             response: body,
             expectedChallenge: user.currentChallenge,
@@ -190,6 +208,7 @@ router.post('/verify-registration', async (req: Request, res: Response) => {
 });
 
 router.get('/generate-authentication-options', async (req: Request, res: Response) => {
+    const { RP_ID } = getRPConfig(req);
     const options = await generateAuthenticationOptions({ rpID: RP_ID, userVerification: 'preferred' });
     authChallenges[options.challenge] = Date.now();
     res.json(options);
@@ -203,6 +222,8 @@ router.post('/verify-authentication', async (req: Request, res: Response) => {
     if (!credential) return res.status(400).json({ error: 'Unrecognized credential' });
 
     try {
+        const { ORIGIN, RP_ID } = getRPConfig(req);
+
         const verification: VerifiedAuthenticationResponse = await verifyAuthenticationResponse({
             response: body,
             expectedChallenge: (challenge) => !!authChallenges[challenge],

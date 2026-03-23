@@ -95,6 +95,13 @@ class ShardRunner {
             stdio: 'pipe'
         });
 
+        // Ensure child process is killed if the main server restarts (prevents EADDRINUSE / orphans)
+        const cleanup = () => { try { child.kill(); } catch(e) {} };
+        process.on('exit', cleanup);
+        process.on('SIGINT', cleanup);
+        process.on('SIGTERM', cleanup);
+        process.on('SIGUSR2', cleanup); // Used by tsx watch / nodemon
+
         child.stdout?.on('data', (data) => console.log(`[SHARD:${slug}] ${data}`));
         child.stderr?.on('data', (data) => console.error(`[SHARD:${slug}:ERR] ${data}`));
 
