@@ -60,7 +60,7 @@ router.get('/status', (req: Request, res: Response) => {
     // We only consider setup complete if there's at least one user with a credential.
     const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');
     const countRow = stmt.get() as { count: number };
-    const needsSetup = countRow.count === 0 && process.env['INITIAL_SETUP_TOKEN'] !== undefined;
+    const needsSetup = countRow.count === 0;
 
     const token = req.cookies.jwt;
     if (token) {
