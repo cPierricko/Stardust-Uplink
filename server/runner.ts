@@ -2,6 +2,7 @@ import { spawn, exec, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import db from './db.js';
+import { SHARDS_DIR } from './config/paths.js';
 
 interface ShardProcess {
     process: ChildProcess;
@@ -9,7 +10,7 @@ interface ShardProcess {
     slug: string;
 }
 
-const shardsStorageDir = path.join(process.cwd(), 'shards_storage');
+const shardsStorageDir = SHARDS_DIR;
 
 class ShardRunner {
     private processes: Map<string, ShardProcess> = new Map();
