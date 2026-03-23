@@ -22,16 +22,21 @@ const getRPConfig = (req: Request) => {
     const isProd = process.env['NODE_ENV'] === 'production';
     const baseDomain = isProd ? 'rogue-one.cloud' : 'localhost';
     
-    // Default to the actual request origin (trusted via 'trust proxy')
-    let ORIGIN = `${req.protocol}://${req.hostname}${req.get('host')?.includes(':') ? ':' + req.get('host')?.split(':')[1] : ''}`;
-    
-    // In local dev, Vite is on 5173
-    if (!isProd && (req.get('origin')?.includes(':5173') || req.get('referer')?.includes(':5173'))) {
+    // 1. Get origin from the browser's header (most reliable for WebAuthn)
+    let ORIGIN = req.get('origin') || req.get('referer') || `${req.protocol}://${req.hostname}`;
+
+    // Clean up ORIGIN (remove paths and trailing slashes)
+    try {
+        const url = new URL(ORIGIN);
+        ORIGIN = url.origin;
+    } catch (e) {}
+
+    // 2. Local dev Vite Port override
+    if (!isProd && ORIGIN.includes(':5173')) {
         ORIGIN = 'http://localhost:5173';
     }
 
-    // We use the base domain as the RP_ID. 
-    // This allow Passkeys to work across ALL subdomains ([slug].rogue-one.cloud).
+    // 3. Simple RP_ID (base domain) to allow subdomain share
     const RP_ID = baseDomain;
     
     return { ORIGIN, RP_ID };
