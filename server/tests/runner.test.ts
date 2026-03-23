@@ -39,7 +39,7 @@ describe('Shard Runner & Proxy', () => {
         const serverCode = `
             import express from 'express';
             const app = express();
-            app.get('/hello', (req, res) => res.json({ message: 'PROXIED_OK' }));
+            app.get('/api/hello', (req, res) => res.json({ message: 'PROXIED_OK' }));
             app.listen(process.env.PORT, () => console.log('Test shard listening'));
         `;
         fs.writeFileSync(path.join(shardPath, 'server.js'), serverCode);
