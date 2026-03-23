@@ -49,8 +49,10 @@ const formatToEnv = (vars: any) => {
 
 // Helper to detect if a shard has a backend entry point
 const detectBackend = (shardPath: string) => {
-    const entries = ['server.cjs', 'server.js', 'index.cjs', 'index.js', 'server.ts', 'index.ts'];
-    return entries.some(e => fs.existsSync(path.join(shardPath, e)));
+    const entries = ['server.cjs', 'server.js', 'index.cjs', 'index.js', 'server.ts', 'index.ts', 'main.js', 'app.js'];
+    const found = entries.filter(e => fs.existsSync(path.join(shardPath, e)));
+    console.log(`[SHARDS] detectBackend at ${shardPath}: found [${found.join(', ')}]`);
+    return found.length > 0;
 };
 
 
@@ -119,6 +121,11 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
     const appSlug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const extractPath = path.join(SHARDS_DIR, appSlug);
 
+    // Initial detection and merge
+    const existing = db.prepare('SELECT id, env_vars, api_token, assigned_port FROM apps WHERE slug = ?').get(appSlug) as any;
+    const finalEnvVars = env_vars || (existing ? existing.env_vars : '{}');
+    let has_backend = existing ? existing.has_backend : 0;
+
     try {
         if (req.file) {
             // Extract ZIP
@@ -153,12 +160,8 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             }
 
             // RE-APPLY ENVIRONMENT VARIABLES: Ensure .env is restored after wipe/extract
-            // If it's an existing shard, we might want to get existing env_vars first
-            const existing = db.prepare('SELECT env_vars FROM apps WHERE slug = ?').get(appSlug) as any;
-            const finalEnvVars = env_vars || (existing ? existing.env_vars : '{}');
-            const envPath = path.join(extractPath, '.env');
-            fs.writeFileSync(envPath, formatToEnv(finalEnvVars));
-            console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${envPath}`);
+            fs.writeFileSync(path.join(extractPath, '.env'), formatToEnv(finalEnvVars));
+            console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${path.join(extractPath, '.env')}`);
 
             // Install dependencies if package.json exists
             if (fs.existsSync(path.join(extractPath, 'package.json'))) {
@@ -207,12 +210,15 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
         }
 
         // Save to Database
-        // Detect if it has a backend after extraction
-        const has_backend = detectBackend(extractPath) ? 1 : 0;
+        // Detect if it has a backend after extraction (IF file was uploaded)
+        if (req.file) {
+            has_backend = detectBackend(extractPath) ? 1 : 0;
+        }
         
-        const existing = db.prepare('SELECT id, api_token, assigned_port FROM apps WHERE slug = ?').get(appSlug) as any;
         const api_token = existing ? existing.api_token : crypto.randomUUID();
         const finalId = existing ? existing.id : crypto.randomUUID();
+
+        console.log(`[SHARDS] Final DB stats for ${appSlug}: id=${finalId}, has_backend=${has_backend}, port=${existing?.assigned_port}`);
 
         const stmt = db.prepare(`
             INSERT INTO apps (id, name, slug, deploy_method, api_token, env_vars, path, has_backend, assigned_port)
@@ -221,6 +227,8 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
                 name = excluded.name,
                 deploy_method = excluded.deploy_method,
                 path = excluded.path,
+                env_vars = excluded.env_vars,
+                api_token = excluded.api_token,
                 has_backend = excluded.has_backend
         `);
 
@@ -230,7 +238,7 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             appSlug,
             deploy_method || 'manual',
             api_token,
-            env_vars || '{}',
+            finalEnvVars, // Use the merged env_vars
             extractPath,
             has_backend,
             existing ? existing.assigned_port : null

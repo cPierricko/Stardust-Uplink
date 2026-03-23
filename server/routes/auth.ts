@@ -20,7 +20,11 @@ const RP_NAME = 'Rogue One App Center';
 
 const getRPConfig = (req: Request) => {
     const isProd = process.env['NODE_ENV'] === 'production';
-    const baseDomain = isProd ? 'rogue-one.cloud' : 'localhost';
+    const host = req.get('host') || '';
+    const parts = host.split('.');
+    
+    // Default to rogue-one.cloud but allow dynamic detection
+    const baseDomain = isProd ? (parts.length >= 2 ? parts.slice(-2).join('.') : 'rogue-one.cloud') : 'localhost';
     
     // 1. Get origin from the browser's header (most reliable for WebAuthn)
     let ORIGIN = req.get('origin') || req.get('referer') || `${req.protocol}://${req.hostname}`;
@@ -63,15 +67,19 @@ router.get('/status', (req: Request, res: Response) => {
     const needsSetup = countRow.count === 0;
 
     const token = req.cookies.jwt;
+    console.log(`[AUTH] GET /status | token present: ${!!token} | host: ${req.get('host')}`);
+    
     if (token) {
         try {
             const decoded = jwt.verify(token, jwtSecret) as { id: string; username: string; role: string };
+            console.log(`[AUTH] Token verified for ${decoded.username}`);
             return res.json({
                 needsSetup,
                 isAuthenticated: true,
                 user: { id: decoded.id, username: decoded.username, role: decoded.role }
             });
-        } catch (err) {
+        } catch (err: any) {
+            console.error(`[AUTH] Token verification failed for ${req.get('host')}: ${err.message}`);
             // Token invalid or expired
         }
     }
@@ -208,6 +216,11 @@ router.post('/verify-registration', async (req: Request, res: Response) => {
 
             const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, jwtSecret, { expiresIn: '7d' });
             const { RP_ID } = getRPConfig(req);
+            
+            // Clear existing cookies to avoid conflicts
+            res.clearCookie('jwt', { domain: RP_ID === 'localhost' ? undefined : `.${RP_ID}` });
+            res.clearCookie('jwt'); // Also clear host-only just in case
+
             res.cookie('jwt', token, {
                 httpOnly: true,
                 secure: process.env['NODE_ENV'] === 'production',
@@ -265,6 +278,11 @@ router.post('/verify-authentication', async (req: Request, res: Response) => {
 
             const token = jwt.sign({ id: credential.user_id, username: credential.username, role: credential.role }, jwtSecret, { expiresIn: '7d' });
             const { RP_ID } = getRPConfig(req);
+            
+            // Clear existing cookies to avoid conflicts
+            res.clearCookie('jwt', { domain: RP_ID === 'localhost' ? undefined : `.${RP_ID}` });
+            res.clearCookie('jwt'); // Also clear host-only just in case
+
             res.cookie('jwt', token, {
                 httpOnly: true,
                 secure: process.env['NODE_ENV'] === 'production',

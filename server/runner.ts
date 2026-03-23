@@ -87,6 +87,8 @@ class ShardRunner {
         else if (fs.existsSync(path.join(shardPath, 'index.js'))) entryPoint = 'index.js';
         else if (fs.existsSync(path.join(shardPath, 'server.ts'))) entryPoint = 'server.ts';
         else if (fs.existsSync(path.join(shardPath, 'index.ts'))) entryPoint = 'index.ts';
+        else if (fs.existsSync(path.join(shardPath, 'main.js'))) entryPoint = 'main.js';
+        else if (fs.existsSync(path.join(shardPath, 'app.js'))) entryPoint = 'app.js';
 
         if (!entryPoint) {
             console.log(`[RUNNER] No backend entry point found for ${slug}`);
