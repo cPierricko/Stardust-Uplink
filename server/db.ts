@@ -95,7 +95,7 @@ function runFirstBootCheck() {
   const countRow = stmt.get() as { count: number };
 
   if (countRow.count === 0) {
-    const setupToken = crypto.randomBytes(32).toString('hex');
+    const setupToken = crypto.randomBytes(16).toString('hex');
     console.log('\n======================================================');
     console.log('⚠️  SECURITY WARNING: FIRST-BOOT SETUP TOKEN GENERATED  ⚠️');
     console.log('Use this token to create your first admin user.');

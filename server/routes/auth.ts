@@ -110,11 +110,14 @@ router.post('/generate-registration-options', async (req: Request, res: Response
         let user: { id: string; username: string; role: string } | undefined;
         const initToken = process.env['INITIAL_SETUP_TOKEN'];
 
+        console.log(`[AUTH_DEBUG] Receiving token: "${setupToken?.trim()}" | Expected: "${initToken?.trim()}"`);
+
         if (initToken && setupToken && setupToken.trim() === initToken.trim()) {
             const userId = crypto.randomUUID();
             user = { id: userId, username: username || 'admin', role: 'administrator' };
-            const stmtCount = db.prepare('SELECT COUNT(*) as count FROM users');
+            const stmtCount = db.prepare('SELECT COUNT(*) as count FROM credentials');
             const countRow = stmtCount.get() as { count: number };
+            console.log(`[AUTH] Setup request for ${username}. Credentials count: ${countRow.count}`);
             if (countRow.count > 0) return res.status(400).json({ error: 'Setup already completed' });
 
             const stmtIns = db.prepare('INSERT OR IGNORE INTO users (id, username, role) VALUES (?, ?, ?)');
@@ -125,7 +128,11 @@ router.post('/generate-registration-options', async (req: Request, res: Response
         } else {
             const stmt = db.prepare('SELECT id, username, setupTokenExpiresAt FROM users WHERE setupToken = ?');
             const existingUser = stmt.get(setupToken) as { id: string; username: string | null; setupTokenExpiresAt: number | null } | undefined;
-            if (!existingUser) return res.status(404).json({ error: 'Invalid or expired setup token' });
+            
+            if (!existingUser) {
+                console.log(`[AUTH] Invalid token: ${setupToken?.substring(0, 8)}... (Env initToken present: ${!!process.env['INITIAL_SETUP_TOKEN']})`);
+                return res.status(404).json({ error: 'Invalid or expired setup token' });
+            }
 
             if (existingUser.setupTokenExpiresAt && existingUser.setupTokenExpiresAt < Date.now()) {
                 db.prepare('UPDATE users SET setupToken = NULL, setupTokenExpiresAt = NULL WHERE id = ?').run(existingUser.id);
