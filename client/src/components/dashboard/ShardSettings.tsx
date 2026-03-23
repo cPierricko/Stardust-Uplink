@@ -57,7 +57,6 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
                 return r.json();
             })
             .then(res => {
-                console.log(`[DEBUG] Token fetch for ${shard.name}:`, res);
                 if (res.success) setToken(res.api_token);
                 else setToken('ERROR_RETRIEVING');
             })
@@ -102,15 +101,12 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
     const handleDelete = async () => {
         setIsDeleting(true);
         try {
-            console.log(`[DEBUG] Initiating delete for shard: ${shard.id}`);
             const res = await fetch(`${API_BASE}/shards/${shard.id}`, {
                 method: 'DELETE',
                 credentials: 'include'
             });
 
             if (!res.ok) {
-                const text = await res.text();
-                console.error(`[DEBUG] Delete failed with status ${res.status}:`, text);
                 showNotification(`DELETE_FAIL_${res.status}`, 'error');
                 setIsDeleting(false);
                 setShowConfirmDelete(false);
@@ -118,7 +114,6 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
             }
 
             const data = await res.json();
-            console.log(`[DEBUG] Delete response:`, data);
             if (data.success) {
                 showNotification('SHARD_DELETED_SUCCESSFULLY');
                 setTimeout(() => {
@@ -131,7 +126,7 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
                 setShowConfirmDelete(false);
             }
         } catch (err: any) {
-            console.error('[DEBUG] Delete system error:', err);
+            console.error('[ShardSettings] Delete error:', err);
             showNotification(`SYS_ERROR: ${err.message}`, 'error');
             setIsDeleting(false);
             setShowConfirmDelete(false);

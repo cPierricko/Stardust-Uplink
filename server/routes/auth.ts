@@ -67,12 +67,10 @@ router.get('/status', (req: Request, res: Response) => {
     const needsSetup = countRow.count === 0;
 
     const token = req.cookies.jwt;
-    console.log(`[AUTH] GET /status | token present: ${!!token} | host: ${req.get('host')}`);
     
     if (token) {
         try {
             const decoded = jwt.verify(token, jwtSecret) as { id: string; username: string; role: string };
-            console.log(`[AUTH] Token verified for ${decoded.username}`);
             return res.json({
                 needsSetup,
                 isAuthenticated: true,
@@ -117,8 +115,6 @@ router.post('/generate-registration-options', async (req: Request, res: Response
         const { setupToken, username } = req.body;
         let user: { id: string; username: string; role: string } | undefined;
         const initToken = process.env['INITIAL_SETUP_TOKEN'];
-
-        console.log(`[AUTH_DEBUG] Receiving token: "${setupToken?.trim()}" | Expected: "${initToken?.trim()}"`);
 
         if (initToken && setupToken && setupToken.trim() === initToken.trim()) {
             const userId = crypto.randomUUID();

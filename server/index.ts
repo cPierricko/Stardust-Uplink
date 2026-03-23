@@ -33,7 +33,7 @@ app.set('trust proxy', 1);
 app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 
-// Global request logger & SUBDOMAINS INTERCEPTOR
+// Global SUBDOMAINS INTERCEPTOR
 app.use((req, res, next) => {
     const host = req.hostname || '';
     
@@ -53,8 +53,6 @@ app.use((req, res, next) => {
         if (!req.url.startsWith(`/shards/${shardSlug}`)) {
             req.url = `/shards/${shardSlug}${req.url}`;
         }
-    } else {
-        console.log(`[REQUEST] ${req.method} ${req.url}`);
     }
     next();
 });

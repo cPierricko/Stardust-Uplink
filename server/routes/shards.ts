@@ -15,10 +15,6 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-router.use((req, res, next) => {
-    console.log(`[SHARDS_ROUTER] ENTER: ${req.method} ${req.url}`);
-    next();
-});
 
 // Helper to parse .env format to JSON string record
 const parseEnvToJSON = (content: string) => {
