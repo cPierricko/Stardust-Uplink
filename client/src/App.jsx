@@ -128,20 +128,23 @@ function AppContent() {
     return <SetupScreen setupToken={invitationToken} onComplete={() => window.location.href = '/'} />;
   }
 
-  if (!isAuthenticated) {
-    return <LoginScreen needsSetup={needsSetup} onLogin={() => window.location.reload()} />;
-  }
-
   return (
     <>
       <Routes>
         <Route path="/" element={
-          <Dashboard 
-            user={user} 
-            shards={shards} 
-            fetchShards={fetchShards} 
-            setAdminOpen={setAdminOpen} 
-          />
+          isAuthenticated ? (
+            <Dashboard 
+              user={user} 
+              shards={shards} 
+              fetchShards={fetchShards} 
+              setAdminOpen={setAdminOpen} 
+            />
+          ) : (
+            <LoginScreen needsSetup={needsSetup} onLogin={() => window.location.reload()} />
+          )
+        } />
+        <Route path="/login" element={
+          <LoginScreen needsSetup={needsSetup} onLogin={() => window.location.reload()} />
         } />
       </Routes>
 

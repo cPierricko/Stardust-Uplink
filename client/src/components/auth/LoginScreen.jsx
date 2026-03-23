@@ -32,7 +32,13 @@ export default function LoginScreen({ onLogin, needsSetup: initialNeedsSetup }) 
             });
 
             if (!vRes.ok) throw new Error('Biometric check failed');
-            onLogin();
+            
+            const redirectTo = searchParams.get('redirect');
+            if (redirectTo) {
+                window.location.href = redirectTo;
+            } else {
+                onLogin();
+            }
         } catch (err) { setError(err.message); }
     };
 
@@ -59,7 +65,13 @@ export default function LoginScreen({ onLogin, needsSetup: initialNeedsSetup }) 
             });
 
             if (!vRes.ok) throw new Error('Verification failed');
-            onLogin();
+            
+            const redirectTo = searchParams.get('redirect');
+            if (redirectTo) {
+                window.location.href = redirectTo;
+            } else {
+                onLogin();
+            }
         } catch (err) { setError(err.message); }
     };
 
