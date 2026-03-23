@@ -109,8 +109,8 @@ class ShardRunner {
         const logPath = path.join(shardPath, 'logs.txt');
         const logStream = fs.createWriteStream(logPath, { flags: 'a' });
         logStream.write(`\n\n--- SERVER START: ${new Date().toISOString()} ---\n`);
-        child.stdout?.pipe(logStream);
-        child.stderr?.pipe(logStream);
+        child.stdout?.pipe(logStream, { end: false });
+        child.stderr?.pipe(logStream, { end: false });
 
         child.on('close', (code) => {
             console.log(`[RUNNER] Shard ${slug} exited with code ${code}`);
