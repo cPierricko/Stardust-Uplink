@@ -57,9 +57,10 @@ setInterval(() => {
 
 // Get Initial Setup Token Status
 router.get('/status', (req: Request, res: Response) => {
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM users');
-    const userCountRow = stmt.get() as { count: number };
-    const needsSetup = userCountRow.count === 0;
+    // We only consider setup complete if there's at least one user with a credential.
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');
+    const countRow = stmt.get() as { count: number };
+    const needsSetup = countRow.count === 0 && process.env['INITIAL_SETUP_TOKEN'] !== undefined;
 
     const token = req.cookies.jwt;
     if (token) {
@@ -116,9 +117,10 @@ router.post('/generate-registration-options', async (req: Request, res: Response
             const countRow = stmtCount.get() as { count: number };
             if (countRow.count > 0) return res.status(400).json({ error: 'Setup already completed' });
 
-            const stmtIns = db.prepare('INSERT INTO users (id, username, role) VALUES (?, ?, ?)');
+            const stmtIns = db.prepare('INSERT OR IGNORE INTO users (id, username, role) VALUES (?, ?, ?)');
             stmtIns.run(user.id, user.username, user.role);
-            delete process.env['INITIAL_SETUP_TOKEN'];
+            // We don't delete INITIAL_SETUP_TOKEN here anymore, 
+            // we delete it in /verify-registration once the first admin is actually registered.
 
         } else {
             const stmt = db.prepare('SELECT id, username, setupTokenExpiresAt FROM users WHERE setupToken = ?');
@@ -203,6 +205,10 @@ router.post('/verify-registration', async (req: Request, res: Response) => {
                 secure: process.env['NODE_ENV'] === 'production',
                 sameSite: 'strict'
             });
+
+            // Cleanup the setup token ONLY now that we have a working admin
+            delete process.env['INITIAL_SETUP_TOKEN'];
+            
             res.json({ verified: true });
 
         } else {
