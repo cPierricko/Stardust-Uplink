@@ -67,10 +67,22 @@ const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
     const token = req.cookies?.jwt;
     if (!token) {
         if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Auth required' });
+        
+        // Calculate the central login URL dynamically
+        const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
         const host = req.get('host') || '';
-        const isLocal = host.includes('localhost');
-        const loginUrl = isLocal ? 'http://localhost:3000/login' : 'https://stardust.rogue-one.cloud/login';
-        return res.redirect(loginUrl);
+        const parts = host.split('.');
+        
+        let loginUrl = '';
+        if (host.includes('localhost')) {
+            loginUrl = 'http://localhost:3000/login';
+        } else {
+            // Redirect to root domain (e.g. rogue-one.cloud)
+            const baseDomain = parts.length >= 2 ? parts.slice(-2).join('.') : 'rogue-one.cloud';
+            loginUrl = `https://${baseDomain}/login`;
+        }
+        
+        return res.redirect(`${loginUrl}?redirect=${encodeURIComponent(protocol + '://' + host + req.originalUrl)}`);
     }
 
     try {
@@ -78,9 +90,12 @@ const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
         next();
     } catch (err) {
         if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Invalid token' });
+        
+        const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
         const host = req.get('host') || '';
-        const isLocal = host.includes('localhost');
-        const loginUrl = isLocal ? 'http://localhost:3000/login' : 'https://stardust.rogue-one.cloud/login';
+        const parts = host.split('.');
+        let loginUrl = host.includes('localhost') ? 'http://localhost:3000/login' : `https://${parts.slice(-2).join('.')}/login`;
+        
         return res.redirect(loginUrl);
     }
 };
