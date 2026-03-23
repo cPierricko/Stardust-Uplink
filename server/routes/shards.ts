@@ -5,7 +5,9 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 import crypto from 'crypto';
+import { exec } from 'child_process';
 import db from '../db.js';
+import runner from '../runner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -98,7 +100,7 @@ const upload = multer({ storage });
  * POST /api/shards/upload
  * Expects: ZIP file in 'app' field, 'name' and 'slug' in body.
  */
-router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
+router.post('/upload', upload.single('app'), async (req: Request, res: Response) => {
     // Audit storage readiness for every request
     ensureDirs();
 
@@ -132,14 +134,16 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
             }
 
             const remainingItems = fs.readdirSync(extractPath);
-            if (remainingItems.length === 1 && remainingItems[0] === 'dist') {
-                const distPath = path.join(extractPath, 'dist');
-                const distItems = fs.readdirSync(distPath);
-                for (const item of distItems) {
-                    fs.renameSync(path.join(distPath, item), path.join(extractPath, item));
+            if (remainingItems.length === 1) {
+                const singleItemPath = path.join(extractPath, remainingItems[0]);
+                if (fs.statSync(singleItemPath).isDirectory()) {
+                    const distItems = fs.readdirSync(singleItemPath);
+                    for (const item of distItems) {
+                        fs.renameSync(path.join(singleItemPath, item), path.join(extractPath, item));
+                    }
+                    fs.rmSync(singleItemPath, { recursive: true });
+                    console.log(`[SHARDS] Flattened nested folder '${remainingItems[0]}' for ${appSlug}`);
                 }
-                fs.rmSync(distPath, { recursive: true });
-                console.log(`[SHARDS] Flattened nested 'dist' folder for ${appSlug}`);
             }
 
             // RE-APPLY ENVIRONMENT VARIABLES: Ensure .env is restored after wipe/extract
@@ -149,6 +153,22 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
             const envPath = path.join(extractPath, '.env');
             fs.writeFileSync(envPath, formatToEnv(finalEnvVars));
             console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${envPath}`);
+
+            // Install dependencies if package.json exists
+            if (fs.existsSync(path.join(extractPath, 'package.json'))) {
+                console.log(`[SHARDS] Found package.json for ${appSlug}, running npm install --omit=dev...`);
+                await new Promise<void>((resolve, reject) => {
+                    exec('npm install --omit=dev', { cwd: extractPath }, (err, stdout, stderr) => {
+                        if (err) {
+                            console.error(`[SHARDS] npm install failed for ${appSlug}:`, stderr);
+                            // We don't reject here to allow the upload to succeed even if install fails
+                        } else {
+                            console.log(`[SHARDS] npm install succeeded for ${appSlug}`);
+                        }
+                        resolve();
+                    });
+                });
+            }
 
         } else {
             // Initialize EMPTY/SHELL shard
@@ -210,6 +230,11 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
             }
         });
 
+        // ASYNC RESTART: Check for backend and start if needed
+        setTimeout(() => {
+            runner.startShard(appSlug).catch(err => console.error(`[SHARDS] Auto-start failed for ${appSlug}:`, err));
+        }, 1000);
+
     } catch (err: any) {
         console.error('[SHARDS] Upload error:', err);
         res.status(500).json({ 
@@ -232,13 +257,16 @@ router.post('/upload', upload.single('app'), (req: Request, res: Response) => {
  * DELETE /api/shards/:id
  * Removes shard files and database entry.
  */
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
         const app = db.prepare('SELECT * FROM apps WHERE id = ?').get(id) as any;
         if (!app) {
             return res.status(404).json({ success: false, error: 'Shard not found' });
         }
+
+        // Stop running process
+        await runner.stopShard(app.slug);
 
         // Remove files
         if (app.path && fs.existsSync(app.path)) {
@@ -325,7 +353,7 @@ router.get('/:id/token', (req: Request, res: Response) => {
  * CI/CD Endpoint: Authenticates via X-Stardust-Token.
  * Expects: ZIP file in 'app' field.
  */
-router.post('/push', upload.single('app'), (req: Request, res: Response) => {
+router.post('/push', upload.single('app'), async (req: Request, res: Response) => {
     const token = req.headers['x-stardust-token'];
     
     if (!token) {
@@ -374,14 +402,16 @@ router.post('/push', upload.single('app'), (req: Request, res: Response) => {
         }
 
         const remainingItems = fs.readdirSync(extractPath);
-        if (remainingItems.length === 1 && remainingItems[0] === 'dist') {
-            const distPath = path.join(extractPath, 'dist');
-            const distItems = fs.readdirSync(distPath);
-            for (const item of distItems) {
-                fs.renameSync(path.join(distPath, item), path.join(extractPath, item));
+        if (remainingItems.length === 1) {
+            const singleItemPath = path.join(extractPath, remainingItems[0]);
+            if (fs.statSync(singleItemPath).isDirectory()) {
+                const distItems = fs.readdirSync(singleItemPath);
+                for (const item of distItems) {
+                    fs.renameSync(path.join(singleItemPath, item), path.join(extractPath, item));
+                }
+                fs.rmSync(singleItemPath, { recursive: true });
+                console.log(`[CI/CD] Flattened nested folder '${remainingItems[0]}' for ${shard.slug}`);
             }
-            fs.rmSync(distPath, { recursive: true });
-            console.log(`[CI/CD] Flattened nested 'dist' folder for ${shard.slug}`);
         }
 
         // RE-APPLY ENVIRONMENT VARIABLES: Restore from database after wipe/extract
@@ -389,6 +419,25 @@ router.post('/push', upload.single('app'), (req: Request, res: Response) => {
         fs.writeFileSync(envPath, formatToEnv(shard.env_vars));
         console.log(`[CI/CD] RESTORED_.ENV: ${shard.slug} at ${envPath}`);
 
+        // Install dependencies if package.json exists
+        if (fs.existsSync(path.join(extractPath, 'package.json'))) {
+            console.log(`[CI/CD] Found package.json for ${shard.slug}, running npm install --omit=dev...`);
+            await new Promise<void>((resolve, reject) => {
+                exec('npm install --omit=dev', { cwd: extractPath }, (err, stdout, stderr) => {
+                    if (err) {
+                        console.error(`[CI/CD] npm install failed for ${shard.slug}:`, stderr);
+                    } else {
+                        console.log(`[CI/CD] npm install succeeded for ${shard.slug}`);
+                    }
+                    resolve();
+                });
+            });
+        }
+
+        // ASYNC RESTART: Trigger reload
+        setTimeout(() => {
+            runner.restartShard(shard.slug).catch(err => console.error(`[CI/CD] Auto-restart failed for ${shard.slug}:`, err));
+        }, 1000);
 
         console.log(`[CI/CD] SUCCESSFULLY_DEPLOYED: ${shard.slug}`);
         
@@ -449,5 +498,185 @@ router.get('/', (req: Request, res: Response) => {
     }
 });
 
+/**
+ * POST /api/shards/:id/restart
+ * Restarts the shard's backend process.
+ */
+router.post('/:id/restart', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const port = await runner.restartShard(shard.slug);
+        res.json({ success: true, message: 'RESTARTED', port });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * GET /api/shards/:id/status
+ * Check if the shard is running and on which port.
+ */
+router.get('/:id/status', (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug, has_backend FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const port = runner.getRunningPort(shard.slug);
+        res.json({ 
+            success: true, 
+            status: port ? 'running' : (shard.has_backend ? 'stopped' : 'no_backend'),
+            port 
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/shards/:id/start
+ * Starts the shard's backend process without full restart if stopped.
+ */
+router.post('/:id/start', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const port = await runner.startShard(shard.slug);
+        res.json({ success: true, message: 'STARTED', port });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/shards/:id/stop
+ * Gracefully stops the shard backend.
+ */
+router.post('/:id/stop', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        await runner.stopShard(shard.slug);
+        res.json({ success: true, message: 'STOPPED' });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /api/shards/:id/database
+ * Wipes the internal SQLite sqlite.db file for the shard.
+ */
+router.delete('/:id/database', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug, path FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        let wiped = false;
+        const allFiles = fs.readdirSync(shard.path);
+        
+        for (const file of allFiles) {
+            if (file.endsWith('.sqlite') || file.endsWith('.db')) {
+                const pathToCheck = path.join(shard.path, file);
+                if (fs.existsSync(pathToCheck)) {
+                    if (!wiped) {
+                        await runner.stopShard(shard.slug);
+                        wiped = true;
+                    }
+                    fs.unlinkSync(pathToCheck);
+                }
+            }
+        }
+
+        if (wiped) {
+            await runner.startShard(shard.slug);
+            return res.json({ success: true, message: 'DATABASE_WIPED_AND_RESTARTED' });
+        } else {
+            return res.json({ success: true, message: 'NO_DATABASE_FOUND' });
+        }
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /api/shards/:id/logs
+ * Clears the latest logs from the shard's backend.
+ */
+router.delete('/:id/logs', (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT path FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const logPath = path.join(shard.path, 'logs.txt');
+        if (fs.existsSync(logPath)) {
+            fs.writeFileSync(logPath, '');
+        }
+        res.json({ success: true, message: 'Logs cleared' });
+    } catch (err: any) {
+        console.error(`[SHARDS] Error clearing logs for ${id}:`, err);
+        res.status(500).json({ error: 'Failed to clear logs' });
+    }
+});
+
+/**
+ * GET /api/shards/:id/logs
+ * Retrieves the latest logs from the shard's backend.
+ */
+router.get('/:id/logs', (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT path FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const logPath = path.join(shard.path, 'logs.txt');
+        if (fs.existsSync(logPath)) {
+            // Read last N bytes to avoid huge memory usage, or just read whole thing if it's small
+            // We'll read the whole thing for simplicity, but ideally we'd tail it.
+            const stats = fs.statSync(logPath);
+            const chunkSize = 50 * 1024; // Last 50KB
+            const startPos = Math.max(0, stats.size - chunkSize);
+            
+            const stream = fs.createReadStream(logPath, { start: startPos, encoding: 'utf8' });
+            let content = '';
+            stream.on('data', chunk => content += chunk);
+            stream.on('end', () => res.json({ success: true, logs: content }));
+        } else {
+            res.json({ success: true, logs: 'NO_LOGS_YET' });
+        }
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/shards/:id/command
+ * Executes an arbitrary command within the shard directory.
+ */
+router.post('/:id/command', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { command } = req.body;
+    
+    if (!command) return res.status(400).json({ error: 'Command required' });
+    
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const output = await runner.runCommand(shard.slug, command);
+        res.json({ success: true, output });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 export default router;

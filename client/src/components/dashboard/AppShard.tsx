@@ -76,7 +76,7 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppSha
                             initial={{ scale: 0.9, opacity: 0, y: 20 }}
                             animate={{ scale: 1, opacity: 1, y: 0 }}
                             exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            className="w-full max-w-lg max-h-[90vh] relative shadow-2xl shadow-cyan-900/20"
+                            className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden relative shadow-2xl shadow-cyan-900/20"
                             onClick={(e) => e.stopPropagation()}
                         >
                             <ShardSettings 

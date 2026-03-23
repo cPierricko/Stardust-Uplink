@@ -11,6 +11,9 @@ import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import deployRoutes from './routes/deploy.js';
 import shardsRoutes, { SHARDS_DIR } from './routes/shards.js';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import runner from './runner.js';
+import db from './db.js';
 
 // Import middleware
 import { requireAuth } from './middleware/auth.js';
@@ -23,38 +26,78 @@ const PORT = process.env['PORT'] || 3000;
 
 // Middleware
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
-app.use(cookieParser());
 
-// Global request logger
+// Global request logger & SUBDOMAINS INTERCEPTOR
 app.use((req, res, next) => {
-    console.log(`[REQUEST] ${req.method} ${req.url}`);
-    next();
-});
+    const host = req.hostname || '';
+    
+    // Check if it's a subdomain request (e.g. slug.localhost or slug.rogue-one.cloud)
+    let shardSlug = null;
+    
+    if (host.endsWith('.localhost') && host !== 'localhost') {
+        const parts = host.split('.');
+        if (parts.length >= 2) shardSlug = parts[0];
+    } else if (host.endsWith('.rogue-one.cloud') && host !== 'rogue-one.cloud' && host !== 'www.rogue-one.cloud') {
+        const parts = host.split('.');
+        if (parts.length >= 3) shardSlug = parts[0];
+    }
 
-// === MAGIC ASSET REDIRECTION ===
-// Intercepte les assets orphelins (chemins absolus) demandés depuis une iframe de shard
-app.use((req: Request, res: Response, next: NextFunction) => {
-    const referer = req.headers.referer;
-    if (referer && referer.includes('/shards/') && !req.path.startsWith('/api') && !req.path.startsWith('/shards')) {
-        try {
-            const refUrl = new URL(referer);
-            const match = refUrl.pathname.match(/\/shards\/([^/]+)/);
-            if (match) {
-                const slug = match[1];
-                const isAsset = /\.(js|css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|ico|webmanifest)$/.test(req.path) || req.path.startsWith('/assets/');
-                if (isAsset) {
-                    console.log(`[MAGIC_REDIRECT] ${req.path} -> /shards/${slug}${req.path}`);
-                    return res.redirect(`/shards/${slug}${req.path}`);
-                }
-            }
-        } catch (err) {}
+    if (shardSlug) {
+        // Rewrite the internal URL so that downstream routers treat it as /shards/slug/...
+        if (!req.url.startsWith(`/shards/${shardSlug}`)) {
+            req.url = `/shards/${shardSlug}${req.url}`;
+        }
+    } else {
+        console.log(`[REQUEST] ${req.method} ${req.url}`);
     }
     next();
 });
 
-// Shard Static Serving (Manual — bypasses express.static for reliability)
-app.use('/shards', (req: Request, res: Response, next: NextFunction) => {
+// === SHARD API PROXY ===
+// Redirects /shards/:slug/api/* to the shard's own backend
+// IMPORTANT: This proxy MUST run BEFORE express.json() parses the body, otherwise the stream is silently consumed!
+app.use('/shards/:slug', async (req: Request, res: Response, next: NextFunction) => {
+    // Only intercept API requests
+    if (!req.url.startsWith('/api')) {
+        return next();
+    }
+
+    const slug = req.params['slug'] as string;
+    const port = runner.getRunningPort(slug);
+
+    if (port) {
+        console.log(`[PROXY] Forwarding to shard ${slug} on port ${port}`);
+        return createProxyMiddleware({
+            target: `http://localhost:${port}`,
+            changeOrigin: true
+        })(req, res, next);
+    }
+    
+    // If not running, try to start it once if it's supposed to have a backend
+    const shard = db.prepare('SELECT has_backend FROM apps WHERE slug = ?').get(slug) as any;
+    if (shard && shard.has_backend) {
+        try {
+            const newPort = await runner.startShard(slug);
+            if (newPort) {
+                return createProxyMiddleware({
+                    target: `http://localhost:${newPort}`,
+                    changeOrigin: true
+                })(req, res, next);
+            }
+        } catch (err) {
+            console.error(`[PROXY] Failed to start shard ${slug} on demand:`, err);
+        }
+    }
+
+    res.status(503).json({ error: 'Shard backend not running or not found' });
+});
+
+// Parsers for Stardust's own API
+app.use(express.json());
+app.use(cookieParser());
+
+// Shard Static Serving
+app.use('/shards', async (req: Request, res: Response, next: NextFunction) => {
     const reqPath = decodeURIComponent(req.path).replace(/^\//, '');
     const fullPath = path.join(SHARDS_DIR, reqPath);
     
@@ -64,17 +107,37 @@ app.use('/shards', (req: Request, res: Response, next: NextFunction) => {
     }
 
     try {
-        if (fs.existsSync(fullPath)) {
-            const stat = fs.lstatSync(fullPath);
+        const stat = await fs.promises.stat(fullPath).catch(() => null);
+        
+        if (stat) {
             if (stat.isFile()) {
-                console.log(`[SHARD_SERVE] File: ${fullPath}`);
+                // Return immediately
                 return res.sendFile(fullPath);
             }
             if (stat.isDirectory()) {
                 const indexPath = path.join(fullPath, 'index.html');
-                if (fs.existsSync(indexPath)) {
-                    console.log(`[SHARD_SERVE] Index: ${indexPath}`);
+                const indexStat = await fs.promises.stat(indexPath).catch(() => null);
+                if (indexStat && indexStat.isFile()) {
                     return res.sendFile(indexPath);
+                }
+            }
+        } else {
+            // SPA FALLBACK FOR SHARDS
+            // If the file is not found, but it's not an asset request, 
+            // serve the shard's index.html (React Router, Vue Router...)
+            const isAsset = /\.(js|css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|ico|webmanifest)$/.test(req.path) || req.path.startsWith('/assets/');
+            
+            if (!isAsset) {
+                // Extract the slug (first folder in the requested path)
+                const slugMatch = req.path.match(/^\/([^/]+)/);
+                if (slugMatch) {
+                    const slug = slugMatch[1];
+                    const shardIndexPath = path.join(SHARDS_DIR, slug, 'index.html');
+                    const indexStat = await fs.promises.stat(shardIndexPath).catch(() => null);
+                    
+                    if (indexStat && indexStat.isFile()) {
+                        return res.sendFile(shardIndexPath);
+                    }
                 }
             }
         }

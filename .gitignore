@@ -148,3 +148,5 @@ Thumbs.db
 server/apps/
 shards_storage/
 temp/
+*.zip
+deploy/*
