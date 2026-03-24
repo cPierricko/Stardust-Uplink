@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, AlertTriangle, ChevronRight, Plus, Trash2, Hash, Copy, Edit3, Check, X } from 'lucide-react';
+import { Shield, AlertTriangle, Plus, Trash2, Hash, Copy, Edit3, Check, X, Terminal, RefreshCw, Pause, Play } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
 import CPULoad from '../ui/CPULoad';
 import DecryptingText from '../ui/DecryptingText';
@@ -102,12 +102,26 @@ interface AdminModalProps {
     currentUser: User | null;
 }
 
+interface LogEntry {
+    ts: string;
+    level: 'log' | 'warn' | 'error';
+    msg: string;
+}
+
 export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
     const [users, setUsers] = useState<User[]>([]);
     const [tokens, setTokens] = useState<DeployToken[]>([]);
     const [newUsername, setNewUsername] = useState<string>('');
     const [lastGeneratedToken, setLastGeneratedToken] = useState<string | null>(null);
     const [copySuccess, setCopySuccess] = useState<boolean>(false);
+
+    // System logs state
+    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [logsLoading, setLogsLoading] = useState(false);
+    const [autoRefresh, setAutoRefresh] = useState(false);
+    const [logsError, setLogsError] = useState<string | null>(null);
+    const logsEndRef = useRef<HTMLDivElement>(null);
+    const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const loadData = () => {
         fetch(`${API_BASE}/admin/users`, { credentials: 'include' })
@@ -122,6 +136,33 @@ export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
     };
 
     useEffect(() => { loadData(); }, []);
+
+    const fetchLogs = async () => {
+        setLogsLoading(true);
+        setLogsError(null);
+        try {
+            const res = await fetch(`${API_BASE}/admin/logs?lines=300`, { credentials: 'include' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            setLogs(data.logs || []);
+            setTimeout(() => logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        } catch (e: any) {
+            setLogsError(e.message);
+        } finally {
+            setLogsLoading(false);
+        }
+    };
+
+    // Auto-refresh effect
+    useEffect(() => {
+        if (autoRefresh) {
+            fetchLogs();
+            autoRefreshRef.current = setInterval(fetchLogs, 5000);
+        } else {
+            if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
+        }
+        return () => { if (autoRefreshRef.current) clearInterval(autoRefreshRef.current); };
+    }, [autoRefresh]);
 
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
@@ -236,6 +277,65 @@ export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
                                     copyToClipboard={copyToClipboard}
                                 />
                             ))}
+                        </div>
+                    </section>
+
+                    {/* ── SYSTEM LOGS ── */}
+                    <section className="space-y-4">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="h-[2px] w-8 bg-empire-red/50"></div>
+                            <h3 className="text-xs font-bold text-white tracking-[0.2em] uppercase flex items-center gap-2">
+                                <Terminal size={12} className="text-empire-red" /> SYSTEM_LOGS
+                            </h3>
+                        </div>
+
+                        <div className="flex gap-2 mb-3">
+                            <button
+                                onClick={fetchLogs}
+                                disabled={logsLoading}
+                                className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/10 transition-colors disabled:opacity-40 tracking-widest"
+                            >
+                                <RefreshCw size={11} className={logsLoading ? 'animate-spin' : ''} />
+                                {logsLoading ? 'PULLING...' : 'PULL_LOGS'}
+                            </button>
+                            <button
+                                onClick={() => setAutoRefresh(v => !v)}
+                                className={`flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold border transition-colors tracking-widest ${
+                                    autoRefresh
+                                        ? 'border-amber-500/60 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
+                                        : 'border-gray-600/40 text-gray-500 hover:text-gray-300 hover:border-gray-500/60'
+                                }`}
+                            >
+                                {autoRefresh ? <><Pause size={11} /> AUTO_ON</> : <><Play size={11} /> AUTO_OFF</>}
+                            </button>
+                        </div>
+
+                        {logsError && (
+                            <div className="text-[10px] text-empire-red font-mono px-3 py-2 border border-empire-red/30 bg-empire-red/5">
+                                ERROR: {logsError}
+                            </div>
+                        )}
+
+                        <div className="bg-black/80 border border-cyan-dark/20 h-72 overflow-y-auto p-3 font-mono text-[10px] leading-relaxed scrollbar-hide">
+                            {logs.length === 0 ? (
+                                <span className="text-gray-600 italic">— no logs loaded — click PULL_LOGS or enable AUTO_ON —</span>
+                            ) : (
+                                logs.map((entry, i) => {
+                                    const color = entry.level === 'error' ? 'text-empire-red' : entry.level === 'warn' ? 'text-amber-400' : 'text-green-400';
+                                    const tsStr = new Date(entry.ts).toLocaleTimeString('fr-FR', { hour12: false });
+                                    return (
+                                        <div key={i} className="flex gap-2 mb-0.5 hover:bg-white/5 px-1">
+                                            <span className="text-gray-600 shrink-0">{tsStr}</span>
+                                            <span className={`shrink-0 w-8 ${color} font-bold uppercase`}>{entry.level === 'log' ? 'INF' : entry.level === 'warn' ? 'WRN' : 'ERR'}</span>
+                                            <span className={`${color} break-all`}>{entry.msg}</span>
+                                        </div>
+                                    );
+                                })
+                            )}
+                            <div ref={logsEndRef} />
+                        </div>
+                        <div className="text-[8px] text-gray-700 font-mono tracking-widest text-right">
+                            {logs.length > 0 ? `${logs.length} LINES BUFFERED · AUTO: ${autoRefresh ? '5s' : 'OFF'}` : 'BUFFER_EMPTY'}
                         </div>
                     </section>
                 </div>

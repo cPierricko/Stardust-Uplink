@@ -1,3 +1,4 @@
+import './logger.js'; // Must be first — captures all console output
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';

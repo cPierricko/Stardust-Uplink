@@ -2,6 +2,8 @@ import express, { Request, Response } from 'express';
 import crypto from 'crypto';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { getLogs } from '../logger.js';
+
 
 const router = express.Router();
 
@@ -89,6 +91,12 @@ router.delete('/tokens/:id', requireAuth, (req: Request, res: Response) => {
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
+});
+
+// Master Backend Logs
+router.get('/logs', requireAuth, (req: Request, res: Response) => {
+    const lines = Math.min(parseInt((req.query['lines'] as string) || '200', 10), 500);
+    res.json({ logs: getLogs(lines) });
 });
 
 export default router;
