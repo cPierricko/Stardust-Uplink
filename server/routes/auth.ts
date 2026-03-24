@@ -23,8 +23,8 @@ const getRPConfig = (req: Request) => {
     const host = req.get('host') || '';
     const parts = host.split('.');
     
-    // Default to rogue-one.cloud but allow dynamic detection
-    const baseDomain = isProd ? (parts.length >= 2 ? parts.slice(-2).join('.') : 'rogue-one.cloud') : 'localhost';
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    const baseDomain = isLocal ? 'localhost' : (parts.length >= 2 ? parts.slice(-2).join('.') : 'rogue-one.cloud');
     
     // 1. Get origin from the browser's header (most reliable for WebAuthn)
     let ORIGIN = req.get('origin') || req.get('referer') || `${req.protocol}://${req.hostname}`;
