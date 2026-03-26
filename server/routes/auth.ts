@@ -296,6 +296,12 @@ router.post('/verify-authentication', async (req: Request, res: Response) => {
 });
 
 router.post('/logout', (req: Request, res: Response) => {
+    const { RP_ID } = getRPConfig(req);
+    // Clear cookies with domain for multi-subdomain support
+    if (RP_ID !== 'localhost') {
+        res.clearCookie('jwt', { domain: `.${RP_ID}` });
+    }
+    // Also clear host-only just in case
     res.clearCookie('jwt');
     res.json({ success: true });
 });
