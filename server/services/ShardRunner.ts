@@ -1,4 +1,5 @@
 import Docker from 'dockerode';
+import net from 'net';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -71,6 +72,38 @@ export class ShardRunner {
 
         const internalIp = network.IPAddress;
         console.log(`[SHARD_RUNNER] Container ${containerName} is UP at IP: ${internalIp}`);
+        console.log(`[SHARD_RUNNER] Container ${containerName} is UP at IP: ${internalIp}. Waiting for health check on port ${port}...`);
+        
+        // 6. Polling TCP Health Check (Timeout: 60s)
+        const isHealthy = await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                resolve(false);
+            }, 60000);
+
+            const interval = setInterval(() => {
+                const socket = new net.Socket();
+                socket.once('connect', () => {
+                    clearTimeout(timeout);
+                    clearInterval(interval);
+                    socket.destroy();
+                    resolve(true);
+                });
+                socket.once('error', () => {
+                    socket.destroy();
+                });
+                socket.connect(port, internalIp);
+            }, 1000);
+        });
+
+        if (!isHealthy) {
+            console.error(`[SHARD_RUNNER] Health check failed for ${containerName} after 60s.`);
+            try {
+                await container.stop();
+            } catch (e) {}
+            throw new Error(`Health check timeout for ${containerName}`);
+        }
+
+        console.log(`[SHARD_RUNNER] Container ${containerName} passed health check and is READY.`);
         
         return internalIp;
     }

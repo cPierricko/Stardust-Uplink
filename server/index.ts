@@ -132,7 +132,19 @@ app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, n
         return createProxyMiddleware({
             target: `http://${targetIP}:${targetPort}`,
             changeOrigin: true,
-            pathRewrite: (path, req) => path.replace(new RegExp(`^/shards/${slug}`), '')
+            pathRewrite: (path, req) => path.replace(new RegExp(`^/shards/${slug}`), ''),
+            headers: {
+                'X-Forwarded-Prefix': `/shards/${slug}`,
+                'Base-URL': `/shards/${slug}`
+            },
+            on: {
+                error: (err: any, req: any, res: any) => {
+                    if (res && res.writeHead) {
+                        res.writeHead(503, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Shard backend not responding or still booting', details: err.message }));
+                    }
+                }
+            }
         })(req, res, next);
     } else if (shard && shard.status === 'BUILDING') {
          return res.status(503).json({ error: 'Shard is currently building, please wait...' });
