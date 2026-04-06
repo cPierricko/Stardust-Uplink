@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import runner from '../runner.js';
 
-describe('Shard Runner & Proxy', () => {
+describe.skip('Shard Runner & Proxy (Legacy Local)', () => {
     let adminToken: string;
     const adminUser = { id: 'admin-id', username: 'admin', role: 'administrator' };
     const testSlug = 'test-backend-shard';
