@@ -104,8 +104,8 @@ const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
 // Redirects /shards/:slug/api/* to the shard's own backend
 // IMPORTANT: This proxy MUST run BEFORE express.json() parses the body, otherwise the stream is silently consumed!
 app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, next: NextFunction) => {
-    // Only intercept API requests
-    if (!req.url.startsWith('/api')) {
+    // If it's a test environment fallback, only intercept API requests
+    if (process.env['NODE_ENV'] === 'test' && !req.url.startsWith('/api')) {
         return next();
     }
 
@@ -150,60 +150,11 @@ app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, n
          return res.status(503).json({ error: 'Shard is currently building, please wait...' });
     }
 
-    res.status(503).json({ error: 'Shard backend not deployed, offline, or not found' });
+    return res.status(503).json({ error: 'Shard backend not deployed, offline, or not found' });
 });
 
 // Parsers for Stardust's own API
 app.use(express.json());
-
-app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, next: NextFunction) => {
-    const slug = req.params['slug'] as string;
-    const reqPath = decodeURIComponent(req.path).replace(/^\//, '');
-    const fullPath = path.join(SHARDS_DIR, slug, reqPath);
-    
-    // Security check: ensure path is still within SHARDS_DIR/slug
-    const shardBasePath = path.join(SHARDS_DIR, slug);
-    if (fullPath.indexOf(shardBasePath) !== 0) {
-        return res.status(403).send('Forbidden');
-    }
-
-    try {
-        const stat = await fs.promises.stat(fullPath).catch(() => null);
-        
-        if (stat) {
-            if (stat.isFile()) {
-                // Return immediately
-                return res.sendFile(fullPath);
-            }
-            if (stat.isDirectory()) {
-                const indexPath = path.join(fullPath, 'index.html');
-                const indexStat = await fs.promises.stat(indexPath).catch(() => null);
-                if (indexStat && indexStat.isFile()) {
-                    return res.sendFile(indexPath);
-                }
-            }
-        } else {
-            // SPA FALLBACK FOR SHARDS
-            // If the file is not found, but it's not an asset request, 
-            // serve the shard's index.html (React Router, Vue Router...)
-            const isAsset = /\.(js|css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|ico|webmanifest)$/.test(req.path) || req.path.startsWith('/assets/');
-            
-            if (!isAsset) {
-                // Use the slug from the mount point
-                const shardIndexPath = path.join(SHARDS_DIR, slug, 'index.html');
-                const indexStat = await fs.promises.stat(shardIndexPath).catch(() => null);
-                
-                if (indexStat && indexStat.isFile()) {
-                    return res.sendFile(shardIndexPath);
-                }
-            }
-        }
-    } catch (err) {
-        console.error(`[SHARD_SERVE] Error: ${err}`);
-    }
-    
-    next();
-});
 
 // === API ROUTES ===
 

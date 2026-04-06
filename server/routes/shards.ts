@@ -11,6 +11,7 @@ import runner from '../runner.js';
 import { SHARDS_DIR as PATHS_SHARDS_DIR } from '../config/paths.js';
 import { ShardBuilder } from '../services/ShardBuilder.js';
 import { ShardRunner } from '../services/ShardRunner.js';
+import Docker from 'dockerode';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -579,11 +580,11 @@ router.get('/:id/status', (req: Request, res: Response) => {
         const shard = db.prepare('SELECT slug, has_backend FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        const port = runner.getRunningPort(shard.slug);
+        const shardInfo = db.prepare('SELECT status, assigned_port FROM apps WHERE slug = ?').get(shard.slug) as any;
         res.json({ 
             success: true, 
-            status: port ? 'running' : (shard.has_backend ? 'stopped' : 'no_backend'),
-            port 
+            status: shardInfo.status === 'DEPLOYED' ? 'running' : shardInfo.status,
+            port: shardInfo.assigned_port
         });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -592,16 +593,24 @@ router.get('/:id/status', (req: Request, res: Response) => {
 
 /**
  * POST /api/shards/:id/start
- * Starts the shard's backend process without full restart if stopped.
  */
 router.post('/:id/start', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug, env_vars, assigned_port FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        const port = await runner.startShard(shard.slug);
-        res.json({ success: true, message: 'STARTED', port });
+        res.json({ success: true, message: 'START_INITIATED' });
+        db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('BUILDING', id);
+        (async () => {
+            try {
+                const bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
+                db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
+                  .run('DEPLOYED', bootResult.ip, bootResult.port, shard.slug);
+            } catch (err) {
+                db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('FAILED', shard.slug);
+            }
+        })();
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
@@ -609,7 +618,6 @@ router.post('/:id/start', async (req: Request, res: Response) => {
 
 /**
  * POST /api/shards/:id/stop
- * Gracefully stops the shard backend.
  */
 router.post('/:id/stop', async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -617,7 +625,13 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
         const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        await runner.stopShard(shard.slug);
+        const containerName = `stardust-shard-${shard.slug}`;
+        try {
+             const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
+             await container.stop();
+        } catch(e) {}
+        
+        db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('FAILED', id);
         res.json({ success: true, message: 'STOPPED' });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -626,86 +640,34 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
 
 /**
  * DELETE /api/shards/:id/database
- * Wipes the internal SQLite sqlite.db file for the shard.
  */
 router.delete('/:id/database', async (req: Request, res: Response) => {
-    const { id } = req.params;
-    try {
-        const shard = db.prepare('SELECT slug, path FROM apps WHERE id = ?').get(id) as any;
-        if (!shard) return res.status(404).json({ error: 'Shard not found' });
-
-        let wiped = false;
-        const allFiles = fs.readdirSync(shard.path);
-        
-        for (const file of allFiles) {
-            if (file.endsWith('.sqlite') || file.endsWith('.db')) {
-                const pathToCheck = path.join(shard.path, file);
-                if (fs.existsSync(pathToCheck)) {
-                    if (!wiped) {
-                        await runner.stopShard(shard.slug);
-                        wiped = true;
-                    }
-                    fs.unlinkSync(pathToCheck);
-                }
-            }
-        }
-
-        if (wiped) {
-            await runner.startShard(shard.slug);
-            return res.json({ success: true, message: 'DATABASE_WIPED_AND_RESTARTED' });
-        } else {
-            return res.json({ success: true, message: 'NO_DATABASE_FOUND' });
-        }
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
-    }
+    return res.status(501).json({ error: 'Function disabled in cloud architecture' });
 });
 
 /**
  * DELETE /api/shards/:id/logs
- * Clears the latest logs from the shard's backend.
  */
 router.delete('/:id/logs', (req: Request, res: Response) => {
-    const { id } = req.params;
-    try {
-        const shard = db.prepare('SELECT path FROM apps WHERE id = ?').get(id) as any;
-        if (!shard) return res.status(404).json({ error: 'Shard not found' });
-
-        const logPath = path.join(shard.path, 'logs.txt');
-        if (fs.existsSync(logPath)) {
-            fs.writeFileSync(logPath, '');
-        }
-        res.json({ success: true, message: 'Logs cleared' });
-    } catch (err: any) {
-        console.error(`[SHARDS] Error clearing logs for ${id}:`, err);
-        res.status(500).json({ error: 'Failed to clear logs' });
-    }
+    res.json({ success: true, message: 'Logs managed by Docker' });
 });
 
 /**
  * GET /api/shards/:id/logs
- * Retrieves the latest logs from the shard's backend.
  */
-router.get('/:id/logs', (req: Request, res: Response) => {
+router.get('/:id/logs', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const shard = db.prepare('SELECT path FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
-
-        const logPath = path.join(shard.path, 'logs.txt');
-        if (fs.existsSync(logPath)) {
-            // Read last N bytes to avoid huge memory usage, or just read whole thing if it's small
-            // We'll read the whole thing for simplicity, but ideally we'd tail it.
-            const stats = fs.statSync(logPath);
-            const chunkSize = 50 * 1024; // Last 50KB
-            const startPos = Math.max(0, stats.size - chunkSize);
-            
-            const stream = fs.createReadStream(logPath, { start: startPos, encoding: 'utf8' });
-            let content = '';
-            stream.on('data', chunk => content += chunk);
-            stream.on('end', () => res.json({ success: true, logs: content }));
-        } else {
-            res.json({ success: true, logs: 'NO_LOGS_YET' });
+        
+        const containerName = `stardust-shard-${shard.slug}`;
+        try {
+             const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
+             const logs = await container.logs({ stdout: true, stderr: true, tail: 100 });
+             res.json({ success: true, logs: logs.toString('utf8') });
+        } catch (e) {
+             res.json({ success: true, logs: 'NO_DOCKER_LOGS_YET' });
         }
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -714,20 +676,31 @@ router.get('/:id/logs', (req: Request, res: Response) => {
 
 /**
  * POST /api/shards/:id/command
- * Executes an arbitrary command within the shard directory.
  */
 router.post('/:id/command', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { command } = req.body;
-    
     if (!command) return res.status(400).json({ error: 'Command required' });
     
     try {
         const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        const output = await runner.runCommand(shard.slug, command);
-        res.json({ success: true, output });
+        const containerName = `stardust-shard-${shard.slug}`;
+        try {
+             const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
+             const exec = await container.exec({
+                  Cmd: ['sh', '-c', command],
+                  AttachStdout: true,
+                  AttachStderr: true
+             });
+             const stream = await exec.start({ Detach: false });
+             let output = '';
+             stream.on('data', chunk => output += chunk.toString('utf8'));
+             stream.on('end', () => res.json({ success: true, output }));
+        } catch (e: any) {
+             res.status(500).json({ error: e.message });
+        }
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
