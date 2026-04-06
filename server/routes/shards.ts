@@ -243,7 +243,13 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
                 try {
                     await ShardBuilder.build(extractPath, appSlug);
                     const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
-                    const internalPort = isNode ? 3000 : 80;
+                    let internalPort = isNode ? 3000 : 80;
+                    if (isNode) {
+                        try {
+                            const pkg = JSON.parse(fs.readFileSync(path.join(extractPath, 'package.json'), 'utf8'));
+                            if (pkg.name === 'n8n' || (pkg.dependencies && pkg.dependencies['n8n'])) internalPort = 5678;
+                        } catch(e) {}
+                    }
                     
                     const bootResult = await ShardRunner.boot(appSlug, finalEnvVars, internalPort);
                     
@@ -453,7 +459,13 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
             try {
                 await ShardBuilder.build(extractPath, shard.slug);
                 const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
-                const internalPort = isNode ? 3000 : 80;
+                let internalPort = isNode ? 3000 : 80;
+                if (isNode) {
+                    try {
+                        const pkg = JSON.parse(fs.readFileSync(path.join(extractPath, 'package.json'), 'utf8'));
+                        if (pkg.name === 'n8n' || (pkg.dependencies && pkg.dependencies['n8n'])) internalPort = 5678;
+                    } catch(e) {}
+                }
                 
                 const bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, internalPort);
                 
