@@ -89,6 +89,16 @@ if (!columnNames.includes('assigned_port')) {
     db.exec('ALTER TABLE apps ADD COLUMN assigned_port INTEGER');
 }
 
+if (!columnNames.includes('status')) {
+    console.log('[DB_MIGRATION] Adding column status to apps table');
+    db.exec("ALTER TABLE apps ADD COLUMN status TEXT DEFAULT 'UNKNOWN'");
+}
+
+if (!columnNames.includes('internal_ip')) {
+    console.log('[DB_MIGRATION] Adding column internal_ip to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN internal_ip TEXT');
+}
+
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');
