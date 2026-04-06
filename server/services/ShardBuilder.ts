@@ -16,10 +16,12 @@ export class ShardBuilder {
         if (fs.existsSync(path.join(shardPath, 'package.json'))) {
             console.log(`[SHARD_BUILDER] Detected Node.js project for ${slug}`);
             dockerfileContent = `
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN apk add --no-cache python3 make g++ && \\
+    npm install --omit=dev --no-audit --no-fund --prefer-offline && \\
+    apk del python3 make g++
 COPY . .
 # Start generic entrypoint if it exists
 CMD ["sh", "-c", "if [ -f server.js ]; then node server.js; elif [ -f server.cjs ]; then node server.cjs; elif [ -f index.js ]; then node index.js; elif [ -f main.js ]; then node main.js; else npm start; fi"]
