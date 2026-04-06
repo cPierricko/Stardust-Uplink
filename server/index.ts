@@ -111,6 +111,18 @@ app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, n
 
     const slug = req.params['slug'] as string;
     
+    // Test environment fallback to local runner proxy
+    if (process.env['NODE_ENV'] === 'test') {
+        const localPort = runner.getRunningPort(slug);
+        if (localPort) {
+            return createProxyMiddleware({
+                target: `http://localhost:${localPort}`,
+                changeOrigin: true,
+                pathRewrite: (path, req) => path.replace(new RegExp(`^/shards/${slug}`), '')
+            })(req, res, next);
+        }
+    }
+
     const shard = db.prepare('SELECT internal_ip, assigned_port, status FROM apps WHERE slug = ?').get(slug) as any;
     
     if (shard && shard.status === 'DEPLOYED' && shard.internal_ip) {
