@@ -17,12 +17,14 @@ import LoginScreen from './components/auth/LoginScreen';
 // Dashboard
 import DeploymentModule from './components/dashboard/DeploymentModule';
 import AppShard from './components/dashboard/AppShard';
+import InfraMonitor from './components/dashboard/InfraMonitor';
 
 // Admin
 import AdminModal from './components/admin/AdminModal';
 
 function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('SHARDS');
 
   return (
     <div className="min-h-screen p-4 md:p-8 flex flex-col items-center relative selection:bg-[#00d4ff]/30 w-full">
@@ -38,38 +40,61 @@ function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
           </motion.div>
         )}
 
-        <h3 className="text-sm font-bold text-[#00d4ff] tracking-widest mt-6 border-b border-cyan-dark pb-2 w-max">ACTIVE DATA SHARDS</h3>
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4, staggerChildren: 0.1 }}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
-        >
-          {shards.map(shard => (
-            <AppShard 
-              key={shard.id} 
-              shard={shard} 
-              onAccess={(s) => {
-                const protocol = window.location.protocol;
-                const hostname = window.location.hostname;
-                const port = window.location.port === '5173' ? ':3000' : (window.location.port ? `:${window.location.port}` : '');
-                
-                if (hostname.includes('localhost') || hostname === '127.0.0.1') {
-                    window.location.href = `${protocol}//${s.slug}.localhost${port}/`;
-                } else if (hostname.includes('rogue-one.cloud')) {
-                    window.location.href = `${protocol}//${s.slug}.rogue-one.cloud${port}/`;
-                } else {
-                    window.location.href = `${protocol}//${s.slug}.${hostname}${port}/`;
-                }
-              }} 
-              onUpdate={fetchShards}
-              onDelete={fetchShards}
-            />
-          ))}
-          {shards.length === 0 && (
-            <div className="col-span-full border-2 border-dashed border-cyan-dark/30 p-12 text-center text-gray-500 font-mono text-sm tracking-widest">
-              NO ACTIVE SHARDS DETECTED. INITIALIZE NEW UPLINK.
-            </div>
+        {/* TABS NAVIGATION */}
+        <div className="flex gap-4 border-b border-cyan-dark/50 pb-2 mt-4">
+          <button 
+            onClick={() => setActiveTab('SHARDS')}
+            className={`text-[10px] sm:text-xs tracking-widest font-bold px-4 py-2 transition-colors uppercase ${activeTab === 'SHARDS' ? 'text-[#00d4ff] bg-[#00d4ff]/10 border border-[#00d4ff]/50' : 'text-gray-500 hover:text-[#00d4ff]/70 border border-transparent'}`}
+          >
+            ACTIVE DATA SHARDS
+          </button>
+          {user?.role === 'administrator' && (
+            <button 
+              onClick={() => setActiveTab('INFRA')}
+              className={`text-[10px] sm:text-xs tracking-widest font-bold px-4 py-2 transition-colors uppercase ${activeTab === 'INFRA' ? 'text-[#00d4ff] bg-[#00d4ff]/10 border border-[#00d4ff]/50' : 'text-gray-500 hover:text-[#00d4ff]/70 border border-transparent'}`}
+            >
+              INFRASTRUCTURE
+            </button>
           )}
-        </motion.div>
+        </div>
+
+        {activeTab === 'SHARDS' ? (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1, staggerChildren: 0.1 }}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
+            {shards.map(shard => (
+              <AppShard 
+                key={shard.id} 
+                shard={shard} 
+                onAccess={(s) => {
+                  const protocol = window.location.protocol;
+                  const hostname = window.location.hostname;
+                  const port = window.location.port === '5173' ? ':3000' : (window.location.port ? `:${window.location.port}` : '');
+                  
+                  if (hostname.includes('localhost') || hostname === '127.0.0.1') {
+                      window.location.href = `${protocol}//${s.slug}.localhost${port}/`;
+                  } else if (hostname.includes('rogue-one.cloud')) {
+                      window.location.href = `${protocol}//${s.slug}.rogue-one.cloud${port}/`;
+                  } else {
+                      window.location.href = `${protocol}//${s.slug}.${hostname}${port}/`;
+                  }
+                }} 
+                onUpdate={fetchShards}
+                onDelete={fetchShards}
+              />
+            ))}
+            {shards.length === 0 && (
+              <div className="col-span-full border-2 border-dashed border-cyan-dark/30 p-12 text-center text-gray-500 font-mono text-sm tracking-widest">
+                NO ACTIVE SHARDS DETECTED. INITIALIZE NEW UPLINK.
+              </div>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+             <InfraMonitor />
+          </motion.div>
+        )}
       </main>
 
       <Footer />
