@@ -110,35 +110,23 @@ app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, n
     }
 
     const slug = req.params['slug'] as string;
-    const port = runner.getRunningPort(slug);
-
-    if (port) {
-        console.log(`[PROXY] Forwarding to shard ${slug} on port ${port}`);
+    
+    const shard = db.prepare('SELECT internal_ip, assigned_port, status FROM apps WHERE slug = ?').get(slug) as any;
+    
+    if (shard && shard.status === 'DEPLOYED' && shard.internal_ip) {
+        const targetIP = shard.internal_ip;
+        const targetPort = shard.assigned_port || 80;
+        
         return createProxyMiddleware({
-            target: `http://localhost:${port}`,
+            target: `http://${targetIP}:${targetPort}`,
             changeOrigin: true,
             pathRewrite: (path, req) => path.replace(new RegExp(`^/shards/${slug}`), '')
         })(req, res, next);
-    }
-    
-    // If not running, try to start it once if it's supposed to have a backend
-    const shard = db.prepare('SELECT has_backend FROM apps WHERE slug = ?').get(slug) as any;
-    if (shard && shard.has_backend) {
-        try {
-            const newPort = await runner.startShard(slug);
-            if (newPort) {
-                return createProxyMiddleware({
-                    target: `http://localhost:${newPort}`,
-                    changeOrigin: true,
-                    pathRewrite: (path, req) => path.replace(new RegExp(`^/shards/${slug}`), '')
-                })(req, res, next);
-            }
-        } catch (err) {
-            console.error(`[PROXY] Failed to start shard ${slug} on demand:`, err);
-        }
+    } else if (shard && shard.status === 'BUILDING') {
+         return res.status(503).json({ error: 'Shard is currently building, please wait...' });
     }
 
-    res.status(503).json({ error: 'Shard backend not running or not found' });
+    res.status(503).json({ error: 'Shard backend not deployed, offline, or not found' });
 });
 
 // Parsers for Stardust's own API

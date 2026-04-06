@@ -9,6 +9,8 @@ import { exec } from 'child_process';
 import db from '../db.js';
 import runner from '../runner.js';
 import { SHARDS_DIR as PATHS_SHARDS_DIR } from '../config/paths.js';
+import { ShardBuilder } from '../services/ShardBuilder.js';
+import { ShardRunner } from '../services/ShardRunner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,21 +156,7 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             fs.writeFileSync(path.join(extractPath, '.env'), formatToEnv(finalEnvVars));
             console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${path.join(extractPath, '.env')}`);
 
-            // Install dependencies if package.json exists
-            if (fs.existsSync(path.join(extractPath, 'package.json'))) {
-                console.log(`[SHARDS] Found package.json for ${appSlug}, running npm install --omit=dev...`);
-                await new Promise<void>((resolve, reject) => {
-                    exec('npm install --omit=dev', { cwd: extractPath }, (err, stdout, stderr) => {
-                        if (err) {
-                            console.error(`[SHARDS] npm install failed for ${appSlug}:`, stderr);
-                            // We don't reject here to allow the upload to succeed even if install fails
-                        } else {
-                            console.log(`[SHARDS] npm install succeeded for ${appSlug}`);
-                        }
-                        resolve();
-                    });
-                });
-            }
+            // Install dependencies block removed - now handled by ShardBuilder async pipeline
 
         } else {
             // Initialize EMPTY/SHELL shard
@@ -212,15 +200,16 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
         console.log(`[SHARDS] Final DB stats for ${appSlug}: id=${finalId}, has_backend=${has_backend}, port=${existing?.assigned_port}`);
 
         const stmt = db.prepare(`
-            INSERT INTO apps (id, name, slug, deploy_method, api_token, env_vars, path, has_backend, assigned_port)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO apps (id, name, slug, deploy_method, api_token, env_vars, path, has_backend, assigned_port, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(slug) DO UPDATE SET
                 name = excluded.name,
                 deploy_method = excluded.deploy_method,
                 path = excluded.path,
                 env_vars = excluded.env_vars,
                 api_token = excluded.api_token,
-                has_backend = excluded.has_backend
+                has_backend = excluded.has_backend,
+                status = excluded.status
         `);
 
         stmt.run(
@@ -232,23 +221,44 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             finalEnvVars, // Use the merged env_vars
             extractPath,
             has_backend,
-            existing ? existing.assigned_port : null
+            existing ? existing.assigned_port : (3000 + Math.floor(Math.random() * 1000)),
+            'BUILDING'
         );
 
         res.json({
             success: true,
+            message: 'UPLOAD_SUCCESS / BUILDING_STARTED',
             data: {
                 id: finalId,
                 slug: appSlug,
                 url: `/shards/${appSlug}`,
-                api_token // Return it once for the user to copy
+                api_token,
+                status: 'BUILDING'
             }
         });
 
-        // ASYNC RESTART: Check for backend and start if needed
-        setTimeout(() => {
-            runner.startShard(appSlug).catch(err => console.error(`[SHARDS] Auto-start failed for ${appSlug}:`, err));
-        }, 1000);
+        // ASYNC DOCKER BUILD & RUN
+        if (req.file) {
+            (async () => {
+                try {
+                    await ShardBuilder.build(extractPath, appSlug);
+                    const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
+                    const internalPort = isNode ? 3000 : 80;
+                    
+                    const internalIp = await ShardRunner.boot(appSlug, finalEnvVars, internalPort);
+                    
+                    db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
+                      .run('DEPLOYED', internalIp, internalPort, appSlug);
+                    
+                    console.log(`[SHARDS] Auto-deploy succeeded for ${appSlug}. IP: ${internalIp}:${internalPort}`);
+                } catch (err) {
+                    console.error(`[SHARDS] Auto-deploy failed for ${appSlug}:`, err);
+                    db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('FAILED', appSlug);
+                }
+            })();
+        } else {
+            db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('READY', appSlug);
+        }
 
     } catch (err: any) {
         console.error('[SHARDS] Upload error:', err);
@@ -434,35 +444,34 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
         fs.writeFileSync(envPath, formatToEnv(shard.env_vars));
         console.log(`[CI/CD] RESTORED_.ENV: ${shard.slug} at ${envPath}`);
 
-        // Install dependencies if package.json exists
-        if (fs.existsSync(path.join(extractPath, 'package.json'))) {
-            console.log(`[CI/CD] Found package.json for ${shard.slug}, running npm install --omit=dev...`);
-            await new Promise<void>((resolve, reject) => {
-                exec('npm install --omit=dev', { cwd: extractPath }, (err, stdout, stderr) => {
-                    if (err) {
-                        console.error(`[CI/CD] npm install failed for ${shard.slug}:`, stderr);
-                    } else {
-                        console.log(`[CI/CD] npm install succeeded for ${shard.slug}`);
-                    }
-                    resolve();
-                });
-            });
-        }
-        
         // Re-detect backend in case it changed
         const has_backend = detectBackend(extractPath) ? 1 : 0;
-        db.prepare('UPDATE apps SET has_backend = ? WHERE slug = ?').run(has_backend, shard.slug);
+        db.prepare('UPDATE apps SET has_backend = ?, status = ? WHERE slug = ?').run(has_backend, 'BUILDING', shard.slug);
 
-        // ASYNC RESTART: Trigger reload
-        setTimeout(() => {
-            runner.restartShard(shard.slug).catch(err => console.error(`[CI/CD] Auto-restart failed for ${shard.slug}:`, err));
-        }, 1000);
+        // ASYNC DOCKER BUILD & RUN
+        (async () => {
+            try {
+                await ShardBuilder.build(extractPath, shard.slug);
+                const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
+                const internalPort = isNode ? 3000 : 80;
+                
+                const internalIp = await ShardRunner.boot(shard.slug, shard.env_vars, internalPort);
+                
+                db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
+                  .run('DEPLOYED', internalIp, internalPort, shard.slug);
+                
+                console.log(`[CI/CD] Auto-deploy succeeded for ${shard.slug}. IP: ${internalIp}:${internalPort}`);
+            } catch (err) {
+                console.error(`[CI/CD] Auto-deploy failed for ${shard.slug}:`, err);
+                db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('FAILED', shard.slug);
+            }
+        })();
 
-        console.log(`[CI/CD] SUCCESSFULLY_DEPLOYED: ${shard.slug}`);
+        console.log(`[CI/CD] BUILDING_STARTED: ${shard.slug}`);
         
         res.json({
             success: true,
-            message: 'DEPLOYMENT_SUCCESSFUL',
+            message: 'BUILDING_STARTED',
             data: {
                 slug: shard.slug,
                 url: `/shards/${shard.slug}`

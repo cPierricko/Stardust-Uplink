@@ -116,21 +116,35 @@ function AppContent() {
   const [shards, setShards] = useState([]);
   const [shardsLoading, setShardsLoading] = useState(false);
 
-  const fetchShards = () => {
-    setShardsLoading(true);
+  const fetchShards = (silent = false) => {
+    if (!silent) setShardsLoading(true);
     fetch(`${API_BASE}/shards`, { credentials: 'include' })
       .then(r => r.json())
       .then(res => {
         if (res.success) {
           setShards(res.data);
         }
-        setShardsLoading(false);
+        if (!silent) setShardsLoading(false);
       })
       .catch(err => {
         console.error('Failed to fetch shards:', err);
-        setShardsLoading(false);
+        if (!silent) setShardsLoading(false);
       });
   };
+
+  // Auto-Refresh Polling Logic
+  useEffect(() => {
+    let interval;
+    const hasBuilding = shards.some(s => s.status === 'BUILDING');
+    if (hasBuilding) {
+      interval = setInterval(() => {
+        fetchShards(true); // Silent fetch, no spinner
+      }, 3000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [shards]);
 
   useEffect(() => {
     fetch(`${API_BASE}/auth/status`, { credentials: 'include' })
