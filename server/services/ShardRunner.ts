@@ -56,6 +56,9 @@ export class ShardRunner {
             Labels: {
                 'com.stardust.shard': slug
             },
+            ExposedPorts: {
+                [`${finalPort}/tcp`]: {}
+            },
             HostConfig: {
                 Memory: 512 * 1024 * 1024, // 512 MB Hard Limit
                 NetworkMode: 'stardust_internal',

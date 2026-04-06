@@ -545,11 +545,25 @@ router.get('/', (req: Request, res: Response) => {
 router.post('/:id/restart', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug, env_vars, assigned_port FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        const port = await runner.restartShard(shard.slug);
-        res.json({ success: true, message: 'RESTARTED', port });
+        // Send early response
+        res.json({ success: true, message: 'RESTART_INITIATED' });
+        
+        // Update db and reboot in background
+        db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('BUILDING', id);
+        
+        (async () => {
+            try {
+                const bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
+                db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
+                  .run('DEPLOYED', bootResult.ip, bootResult.port, shard.slug);
+            } catch (err) {
+                console.error(`[SHARDS] Restart failed for ${shard.slug}:`, err);
+                db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('FAILED', shard.slug);
+            }
+        })();
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }

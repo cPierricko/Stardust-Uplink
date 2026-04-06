@@ -70,6 +70,20 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppSha
                 <div className="flex justify-between items-start mb-2">
                     <h3 className="text-sm font-bold text-white tracking-widest filter drop-shadow-[0_0_2px_#fff]">{'>>'} SHARD: {shard.name}</h3>
                     <div className="flex gap-2">
+                        <button
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                if (confirm('REBOOT SHARD?')) {
+                                    await fetch(`${API_BASE}/shards/${shard.id}/restart`, { method: 'POST', credentials: 'include' });
+                                    onUpdate();
+                                }
+                            }}
+                            disabled={status === 'BUILDING'}
+                            className="p-1.5 border border-cyan-900/30 text-orange-500 hover:text-orange-400 hover:border-orange-400/50 transition-all bg-orange-950/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Restart Shard"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        </button>
                         <button 
                             onClick={(e) => {
                                 e.stopPropagation();
