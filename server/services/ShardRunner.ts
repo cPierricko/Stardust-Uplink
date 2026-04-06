@@ -4,7 +4,7 @@ import net from 'net';
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 export class ShardRunner {
-    static async boot(slug: string, envVarsParam: any, port: number): Promise<string> {
+    static async boot(slug: string, envVarsParam: any, defaultPort: number = 3000): Promise<{ ip: string; port: number }> {
         console.log(`[SHARD_RUNNER] Booting container for ${slug}...`);
         
         const containerName = `stardust-shard-${slug}`;
@@ -26,21 +26,26 @@ export class ShardRunner {
             }
         }
 
-        // 2. Prepare Environment Variables
+        // 2. Prepare Environment Variables and detect PORT
+        let finalPort = defaultPort;
         let envArray: string[] = [];
         try {
             const parsedEnv = typeof envVarsParam === 'string' ? JSON.parse(envVarsParam) : envVarsParam;
             if (parsedEnv) {
                 for (const [key, value] of Object.entries(parsedEnv)) {
                     envArray.push(`${key}=${value}`);
+                    if (key.toUpperCase() === 'PORT') {
+                        finalPort = parseInt(value as string, 10) || 3000;
+                    }
                 }
             }
         } catch (err) {
             console.warn(`[SHARD_RUNNER] Could not parse env vars as JSON for ${slug}, skipping injection.`);
         }
         
-        // Ensure PORT is set to the internal target if it expects port via env
-        envArray.push(`PORT=${port}`);
+        if (!envArray.some(e => e.toUpperCase().startsWith('PORT='))) {
+            envArray.push(`PORT=${finalPort}`);
+        }
 
         // 3. Create Container
         console.log(`[SHARD_RUNNER] Creating container ${containerName}...`);
@@ -54,7 +59,7 @@ export class ShardRunner {
             HostConfig: {
                 Memory: 512 * 1024 * 1024, // 512 MB Hard Limit
                 NetworkMode: 'stardust_internal',
-                // No PortBindings -> No public exposure
+                RestartPolicy: { Name: 'unless-stopped' }
             }
         });
 
@@ -71,8 +76,7 @@ export class ShardRunner {
         }
 
         const internalIp = network.IPAddress;
-        console.log(`[SHARD_RUNNER] Container ${containerName} is UP at IP: ${internalIp}`);
-        console.log(`[SHARD_RUNNER] Container ${containerName} is UP at IP: ${internalIp}. Waiting for health check on port ${port}...`);
+        console.log(`[SHARD_RUNNER] Container ${containerName} is UP at IP: ${internalIp}. Waiting for health check on port ${finalPort}...`);
         
         // 6. Polling TCP Health Check (Timeout: 60s)
         const isHealthy = await new Promise((resolve) => {
@@ -91,12 +95,18 @@ export class ShardRunner {
                 socket.once('error', () => {
                     socket.destroy();
                 });
-                socket.connect(port, internalIp);
+                socket.connect(finalPort, internalIp);
             }, 1000);
         });
 
         if (!isHealthy) {
-            console.error(`[SHARD_RUNNER] Health check failed for ${containerName} after 60s.`);
+            console.error(`[SHARD_RUNNER] Health check failed for ${containerName} after 60s. Fetching logs...`);
+            try {
+                const logs = await container.logs({ stdout: true, stderr: true, tail: 50 });
+                console.error(`[SHARD_RUNNER] Crash Logs for ${containerName}:\n${logs.toString('utf8')}`);
+            } catch (logErr) {
+                console.error(`[SHARD_RUNNER] Could not fetch logs for crash on ${containerName}`);
+            }
             try {
                 await container.stop();
             } catch (e) {}
@@ -105,6 +115,6 @@ export class ShardRunner {
 
         console.log(`[SHARD_RUNNER] Container ${containerName} passed health check and is READY.`);
         
-        return internalIp;
+        return { ip: internalIp, port: finalPort };
     }
 }
