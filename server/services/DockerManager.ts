@@ -1,5 +1,11 @@
 import Docker from 'dockerode';
 import os from 'os';
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class DockerManagerService {
     private docker: Docker;
@@ -29,9 +35,46 @@ class DockerManagerService {
                 console.log('Network stardust_internal already exists.');
             }
         } catch (error) {
-            console.error('Failed to initialize DockerManager:', error);
-            throw error;
+            console.error('[!] Failed to connect to Docker. Triggering self-heal...');
+            try {
+                await this.selfHeal();
+                // Retry initialization after healing
+                this.docker = new Docker({ socketPath: '/var/run/docker.sock' });
+                await this.docker.ping();
+                console.log('[+] Docker reconnected successfully after self-heal.');
+            } catch (healError) {
+                console.error('[!] CRITICAL: Self-heal failed. Admin intervention required.', healError);
+                throw healError;
+            }
         }
+    }
+
+    async selfHeal() {
+        console.log('[+] Starting Docker self-heal process...');
+        return new Promise<void>((resolve, reject) => {
+            const scriptPath = path.join(__dirname, '..', 'scripts', 'setup-vps.sh');
+            const setupProcess = spawn('bash', [scriptPath]);
+
+            setupProcess.stdout.on('data', (data) => {
+                const message = data.toString().trim();
+                if (message) console.log(`[SETUP-VPS] ${message}`);
+            });
+
+            setupProcess.stderr.on('data', (data) => {
+                const message = data.toString().trim();
+                if (message) console.error(`[SETUP-VPS ERR] ${message}`);
+            });
+
+            setupProcess.on('close', (code) => {
+                if (code === 0) {
+                    console.log('[+] Docker self-heal process completed successfully.');
+                    resolve();
+                } else {
+                    console.error(`[!] Docker self-heal process exited with code ${code}.`);
+                    reject(new Error(`Provisioning script failed with code ${code}`));
+                }
+            });
+        });
     }
 
     async getGlobalStats() {

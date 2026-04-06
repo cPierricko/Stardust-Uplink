@@ -114,4 +114,18 @@ router.get('/system/docker', requireAuth, async (req: Request, res: Response) =>
     }
 });
 
+// Trigger manual infrastructure provision
+router.post('/system/provision', requireAuth, async (req: Request, res: Response) => {
+    // Démarrage manuel asynchrone pour ne pas bloquer la requête HTTP
+    DockerManager.selfHeal()
+        .then(() => {
+            console.log('[+] Manual provisioning completed successfully.');
+        })
+        .catch(err => {
+            console.error('[!] Manual provisioning failed:', err);
+        });
+    
+    res.status(202).json({ success: true, message: 'Provisioning started in background' });
+});
+
 export default router;
