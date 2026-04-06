@@ -27,6 +27,8 @@ export interface Shard {
     path: string;
     has_backend?: boolean;
     assigned_port?: number;
+    status?: string;
+    internal_ip?: string;
 }
 
 export interface ShardUploadResponse {

@@ -47,12 +47,16 @@ CMD ["tail", "-f", "/dev/null"]
         
         console.log(`[SHARD_BUILDER] Dockerfile created, archiving and streaming to Docker daemon for ${slug}...`);
 
+        const logFile = path.join(shardPath, 'logs.txt');
+        fs.writeFileSync(logFile, `[SYSTEM] Initiating Docker build for ${slug}...\n`);
+
         return new Promise((resolve, reject) => {
             const pack = tar.pack(shardPath);
             
             docker.buildImage(pack, { t: tag }, (err, response) => {
                 if (err) {
                     console.error(`[SHARD_BUILDER] Error starting build for ${slug}:`, err);
+                    fs.appendFileSync(logFile, `[ERROR] Build start failed: ${err.message}\n`);
                     return reject(err);
                 }
                 
@@ -64,9 +68,11 @@ CMD ["tail", "-f", "/dev/null"]
                     (followErr, output) => { // onFinished
                         if (followErr) {
                             console.error(`[SHARD_BUILDER] Build failed for ${slug}:`, followErr);
+                            fs.appendFileSync(logFile, `\n[ERROR] Build failed: ${followErr.message}\n`);
                             return reject(followErr);
                         }
                         console.log(`[SHARD_BUILDER] Build successfully completed for ${slug} -> ${tag}`);
+                        fs.appendFileSync(logFile, `\n[SUCCESS] Build successfully completed.\n`);
                         resolve();
                     }, 
                     (event: any) => { // onProgress
@@ -74,9 +80,11 @@ CMD ["tail", "-f", "/dev/null"]
                             const trimmed = event.stream.trim();
                             if (trimmed) {
                                 console.log(`[BUILD ${slug}]`, trimmed);
+                                fs.appendFileSync(logFile, `${trimmed}\n`);
                             }
                         } else if (event.error) {
                             console.error(`[BUILD ${slug} ERROR]`, event.error);
+                            fs.appendFileSync(logFile, `[ERROR] ${event.error}\n`);
                         }
                     }
                 );
