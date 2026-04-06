@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getLogs } from '../logger.js';
+import { DockerManager } from '../services/DockerManager.js';
 
 
 const router = express.Router();
@@ -97,6 +98,34 @@ router.delete('/tokens/:id', requireAuth, (req: Request, res: Response) => {
 router.get('/logs', requireAuth, (req: Request, res: Response) => {
     const lines = Math.min(parseInt((req.query['lines'] as string) || '200', 10), 500);
     res.json({ logs: getLogs(lines) });
+});
+
+// System & Docker Diagnostics
+router.get('/system/docker', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const stats = await DockerManager.getGlobalStats();
+        const shards = await DockerManager.listShards();
+        res.json({
+            stats,
+            shards
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Trigger manual infrastructure provision
+router.post('/system/provision', requireAuth, async (req: Request, res: Response) => {
+    // Démarrage manuel asynchrone pour ne pas bloquer la requête HTTP
+    DockerManager.selfHeal()
+        .then(() => {
+            console.log('[+] Manual provisioning completed successfully.');
+        })
+        .catch(err => {
+            console.error('[!] Manual provisioning failed:', err);
+        });
+    
+    res.status(202).json({ success: true, message: 'Provisioning started in background' });
 });
 
 export default router;

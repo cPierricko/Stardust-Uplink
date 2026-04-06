@@ -15,6 +15,7 @@ import shardsRoutes, { SHARDS_DIR } from './routes/shards.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import runner from './runner.js';
 import db from './db.js';
+import { DockerManager } from './services/DockerManager.js';
 
 // Import middleware
 import { requireAuth } from './middleware/auth.js';
@@ -241,6 +242,10 @@ app.use((req: Request, res: Response) => {
 
 // Start Server
 if (process.env['NODE_ENV'] !== 'test') {
+    DockerManager.init().catch(err => {
+        console.error('[RO_OS] Docker init failed:', err.message);
+    });
+
     app.listen(PORT, () => {
         console.log(`[RO_OS] Server active on port ${PORT}`);
         console.log(`[RO_OS] Shards: ${SHARDS_DIR}`);
