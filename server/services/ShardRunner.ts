@@ -1,5 +1,7 @@
 import Docker from 'dockerode';
 import net from 'net';
+import fs from 'fs';
+import path from 'path';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -46,6 +48,23 @@ export class ShardRunner {
         if (!envArray.some(e => e.toUpperCase().startsWith('PORT='))) {
             envArray.push(`PORT=${finalPort}`);
         }
+        
+        // Ensure N8N uses the mapped data volume
+        if (!envArray.some(e => e.toUpperCase().startsWith('N8N_USER_FOLDER='))) {
+            envArray.push(`N8N_USER_FOLDER=/app/data`);
+        }
+
+        // 3. Setup Persistent Volume
+        const persistentPath = path.join(process.cwd(), 'persistent_data', slug);
+        if (!fs.existsSync(persistentPath)) {
+            fs.mkdirSync(persistentPath, { recursive: true });
+        }
+        // Grant full access so non-root container users (like node) can write to it
+        try {
+             fs.chmodSync(persistentPath, 0o777);
+        } catch (e) {
+             console.warn(`[SHARD_RUNNER] Could not chmod 777 persistent directory for ${slug}`, e);
+        }
 
         // 3. Create Container
         console.log(`[SHARD_RUNNER] Creating container ${containerName}...`);
@@ -60,6 +79,9 @@ export class ShardRunner {
                 [`${finalPort}/tcp`]: {}
             },
             HostConfig: {
+                Binds: [
+                     `${persistentPath}:/app/data`
+                ],
                 Memory: 512 * 1024 * 1024, // 512 MB Hard Limit
                 NetworkMode: 'stardust_internal',
                 RestartPolicy: { Name: 'unless-stopped' }

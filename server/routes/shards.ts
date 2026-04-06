@@ -297,8 +297,22 @@ router.delete('/:id', async (req: Request, res: Response) => {
             return res.status(404).json({ success: false, error: 'Shard not found' });
         }
 
-        // Stop running process
-        await runner.stopShard(app.slug);
+        // Stop and remove Docker container and image
+        try {
+            const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+            const containerName = `stardust-shard-${app.slug}`;
+            const container = docker.getContainer(containerName);
+            
+            try { await container.stop(); } catch(e) {}
+            try { await container.remove({ force: true }); } catch(e) {}
+            
+            const image = docker.getImage(`shard-${app.slug}`);
+            try { await image.remove({ force: true }); } catch(e) {}
+            
+            console.log(`[SHARDS] DOCKER_CLEANUP_SUCCESS: ${app.slug}`);
+        } catch (dockerErr) {
+            console.warn(`[SHARDS] DOCKER_CLEANUP_FAILED: ${app.slug}`, dockerErr);
+        }
 
         // Remove files
         if (app.path && fs.existsSync(app.path)) {
