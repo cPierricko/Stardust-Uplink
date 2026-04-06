@@ -245,12 +245,12 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
                     const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
                     const internalPort = isNode ? 3000 : 80;
                     
-                    const internalIp = await ShardRunner.boot(appSlug, finalEnvVars, internalPort);
+                    const bootResult = await ShardRunner.boot(appSlug, finalEnvVars, internalPort);
                     
                     db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
-                      .run('DEPLOYED', internalIp, internalPort, appSlug);
+                      .run('DEPLOYED', bootResult.ip, bootResult.port, appSlug);
                     
-                    console.log(`[SHARDS] Auto-deploy succeeded for ${appSlug}. IP: ${internalIp}:${internalPort}`);
+                    console.log(`[SHARDS] Auto-deploy succeeded for ${appSlug}. IP: ${bootResult.ip}:${bootResult.port}`);
                 } catch (err) {
                     console.error(`[SHARDS] Auto-deploy failed for ${appSlug}:`, err);
                     db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('FAILED', appSlug);
@@ -455,12 +455,12 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
                 const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
                 const internalPort = isNode ? 3000 : 80;
                 
-                const internalIp = await ShardRunner.boot(shard.slug, shard.env_vars, internalPort);
+                const bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, internalPort);
                 
                 db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
-                  .run('DEPLOYED', internalIp, internalPort, shard.slug);
+                  .run('DEPLOYED', bootResult.ip, bootResult.port, shard.slug);
                 
-                console.log(`[CI/CD] Auto-deploy succeeded for ${shard.slug}. IP: ${internalIp}:${internalPort}`);
+                console.log(`[CI/CD] Auto-deploy succeeded for ${shard.slug}. IP: ${bootResult.ip}:${bootResult.port}`);
             } catch (err) {
                 console.error(`[CI/CD] Auto-deploy failed for ${shard.slug}:`, err);
                 db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('FAILED', shard.slug);

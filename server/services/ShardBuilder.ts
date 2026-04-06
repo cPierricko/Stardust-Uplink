@@ -24,7 +24,7 @@ RUN apk add --no-cache python3 make g++ && \\
     apk del python3 make g++
 COPY . .
 # Start generic entrypoint if it exists
-CMD ["sh", "-c", "if [ -f server.js ]; then node server.js; elif [ -f server.cjs ]; then node server.cjs; elif [ -f index.js ]; then node index.js; elif [ -f main.js ]; then node main.js; else npm start; fi"]
+CMD ["npm", "start"]
             `.trim();
         } else if (fs.existsSync(path.join(shardPath, 'index.html'))) {
             console.log(`[SHARD_BUILDER] Detected Static project for ${slug}`);
