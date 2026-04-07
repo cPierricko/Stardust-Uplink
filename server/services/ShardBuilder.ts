@@ -17,15 +17,6 @@ export class ShardBuilder {
 
         if (userProvidedDocker) {
             console.log(`[SHARD_BUILDER] Detected native Dockerfile for ${slug}. Respecting custom configuration.`);
-            
-            // Dockerode (Standard API) does not parse BuildKit variables in FROM statements natively
-            // So we statically replace common BuildKit variables to prevent 'failed to parse platform' errors
-            const dockerFilePath = path.join(shardPath, 'Dockerfile');
-            let content = fs.readFileSync(dockerFilePath, 'utf8');
-            const platform = process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64';
-            content = content.replace(/\$\{BUILDPLATFORM\}|\$BUILDPLATFORM/g, platform);
-            content = content.replace(/\$\{TARGETPLATFORM\}|\$TARGETPLATFORM/g, platform);
-            fs.writeFileSync(dockerFilePath, content);
         } else {
             if (fs.existsSync(path.join(shardPath, 'package.json'))) {
                 console.log(`[SHARD_BUILDER] Detected Node.js project for ${slug}`);
@@ -67,54 +58,44 @@ CMD ["tail", "-f", "/dev/null"]
         const logFile = path.join(shardPath, 'logs.txt');
         fs.writeFileSync(logFile, `[SYSTEM] Initiating Docker build for ${slug}...\n`);
 
-        return new Promise((resolve, reject) => {
-            const pack = tar.pack(shardPath);
-            
-            const platform = process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64';
-            docker.buildImage(pack, { 
-                t: tag,
-                buildargs: {
-                    BUILDPLATFORM: platform,
-                    TARGETPLATFORM: platform
+        return new Promise(async (resolve, reject) => {
+            const { spawn } = await import('child_process');
+
+            const buildProcess = spawn('docker', ['build', '-t', tag, '.'], {
+                cwd: shardPath,
+                env: { ...process.env, DOCKER_BUILDKIT: '1' }
+            });
+
+            buildProcess.stdout.on('data', (data) => {
+                const text = data.toString('utf8');
+                if (text.trim()) {
+                    console.log(`[BUILD ${slug}]`, text.trim());
+                    fs.appendFileSync(logFile, text);
                 }
-            }, (err, response) => {
-                if (err) {
-                    console.error(`[SHARD_BUILDER] Error starting build for ${slug}:`, err);
-                    fs.appendFileSync(logFile, `[ERROR] Build start failed: ${err.message}\n`);
+            });
+
+            buildProcess.stderr.on('data', (data) => {
+                const text = data.toString('utf8');
+                if (text.trim()) {
+                    console.error(`[BUILD ${slug}]`, text.trim());
+                    fs.appendFileSync(logFile, text);
+                }
+            });
+
+            buildProcess.on('close', (code) => {
+                if (code !== 0) {
+                    const err = new Error(`Docker build failed with code ${code}`);
+                    fs.appendFileSync(logFile, `\n[ERROR] Build failed with code ${code}\n`);
                     return reject(err);
                 }
-                
-                if (!response) {
-                    return reject(new Error('No response from docker build API'));
-                }
-                
-                let buildError: Error | null = null;
-                docker.modem.followProgress(response, 
-                    (followErr, output) => { // onFinished
-                        const finalErr = followErr || buildError;
-                        if (finalErr) {
-                            console.error(`[SHARD_BUILDER] Build failed for ${slug}:`, finalErr);
-                            fs.appendFileSync(logFile, `\n[ERROR] Build failed: ${finalErr.message}\n`);
-                            return reject(finalErr);
-                        }
-                        console.log(`[SHARD_BUILDER] Build successfully completed for ${slug} -> ${tag}`);
-                        fs.appendFileSync(logFile, `\n[SUCCESS] Build successfully completed.\n`);
-                        resolve();
-                    }, 
-                    (event: any) => { // onProgress
-                        if (event.stream) {
-                            const trimmed = event.stream.trim();
-                            if (trimmed) {
-                                console.log(`[BUILD ${slug}]`, trimmed);
-                                fs.appendFileSync(logFile, `${trimmed}\n`);
-                            }
-                        } else if (event.error) {
-                            buildError = new Error(event.error);
-                            console.error(`[BUILD ${slug} ERROR]`, event.error);
-                            fs.appendFileSync(logFile, `[ERROR] ${event.error}\n`);
-                        }
-                    }
-                );
+                console.log(`[SHARD_BUILDER] Build successfully completed for ${slug} -> ${tag}`);
+                fs.appendFileSync(logFile, `\n[SUCCESS] Build successfully completed.\n`);
+                resolve();
+            });
+
+            buildProcess.on('error', (err) => {
+                fs.appendFileSync(logFile, `\n[ERROR] Process communication failed: ${err.message}\n`);
+                reject(err);
             });
         });
     }

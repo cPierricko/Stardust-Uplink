@@ -681,9 +681,19 @@ router.delete('/:id/logs', (req: Request, res: Response) => {
 router.get('/:id/logs', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug, status FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
         
+        // If still building, serve the internal build logs file
+        if (shard.status === 'BUILDING') {
+            const logPath = path.join(PATHS_SHARDS_DIR, shard.slug, 'logs.txt');
+            if (fs.existsSync(logPath)) {
+                return res.json({ success: true, logs: fs.readFileSync(logPath, 'utf8') });
+            }
+            return res.json({ success: true, logs: 'UPLINK_ESTABLISHING... WAITING_FOR_BUILD_LOGS' });
+        }
+
+        // Once deployed or failed, serve the actual Docker container runtime logs
         const containerName = `stardust-shard-${shard.slug}`;
         try {
              const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
