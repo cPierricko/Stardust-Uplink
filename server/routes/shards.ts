@@ -7,7 +7,7 @@ import AdmZip from 'adm-zip';
 import crypto from 'crypto';
 import { exec } from 'child_process';
 import db from '../db.js';
-import runner from '../runner.js';
+
 import { SHARDS_DIR as PATHS_SHARDS_DIR } from '../config/paths.js';
 import { ShardBuilder } from '../services/ShardBuilder.js';
 import { ShardRunner } from '../services/ShardRunner.js';
