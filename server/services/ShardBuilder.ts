@@ -17,6 +17,15 @@ export class ShardBuilder {
 
         if (userProvidedDocker) {
             console.log(`[SHARD_BUILDER] Detected native Dockerfile for ${slug}. Respecting custom configuration.`);
+            
+            // Dockerode (Standard API) does not parse BuildKit variables in FROM statements natively
+            // So we statically replace common BuildKit variables to prevent 'failed to parse platform' errors
+            const dockerFilePath = path.join(shardPath, 'Dockerfile');
+            let content = fs.readFileSync(dockerFilePath, 'utf8');
+            const platform = process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64';
+            content = content.replace(/\$\{BUILDPLATFORM\}|\$BUILDPLATFORM/g, platform);
+            content = content.replace(/\$\{TARGETPLATFORM\}|\$TARGETPLATFORM/g, platform);
+            fs.writeFileSync(dockerFilePath, content);
         } else {
             if (fs.existsSync(path.join(shardPath, 'package.json'))) {
                 console.log(`[SHARD_BUILDER] Detected Node.js project for ${slug}`);
