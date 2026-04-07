@@ -34,6 +34,22 @@ class DockerManagerService {
             } else {
                 console.log('Network stardust_internal already exists.');
             }
+
+            // Sync Container IPs with Database on boot
+            try {
+                const db = (await import('../db.js')).default;
+                const shards = await this.listShards();
+                for (const containerInfo of shards) {
+                    const slug = containerInfo.Labels['com.stardust.shard'];
+                    const netInfo = containerInfo.NetworkSettings?.Networks?.['stardust_internal'];
+                    if (slug && netInfo && netInfo.IPAddress) {
+                        db.prepare('UPDATE apps SET internal_ip = ?, status = ? WHERE slug = ?').run(netInfo.IPAddress, 'DEPLOYED', slug);
+                    }
+                }
+                console.log('[+] Synchronized Shard IPs with Docker daemon.');
+            } catch (syncErr: any) {
+                console.warn('[!] Failed to sync Shard IPs on boot:', syncErr.message);
+            }
         } catch (error) {
             console.error('[!] Failed to connect to Docker. Triggering self-heal...');
             try {

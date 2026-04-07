@@ -131,24 +131,39 @@ export class ShardRunner {
         const internalIp = network.IPAddress;
         console.log(`[SHARD_RUNNER] Container ${containerName} is UP at IP: ${internalIp}. Waiting for health check on port ${finalPort}...`);
         
-        // 6. Polling TCP Health Check (Timeout: 60s)
+        // 6. Polling TCP Health Check with Auto-Discovery (Timeout: 60s)
+        const scanPorts = Array.from(new Set([finalPort, 3000, 4000, 5000, 5173, 8080, 5678, 8000]));
+        let detectedPort = finalPort;
+
         const isHealthy = await new Promise((resolve) => {
             const timeout = setTimeout(() => {
                 resolve(false);
             }, 60000);
 
+            let sockets: net.Socket[] = [];
+
             const interval = setInterval(() => {
-                const socket = new net.Socket();
-                socket.once('connect', () => {
-                    clearTimeout(timeout);
-                    clearInterval(interval);
-                    socket.destroy();
-                    resolve(true);
-                });
-                socket.once('error', () => {
-                    socket.destroy();
-                });
-                socket.connect(finalPort, internalIp);
+                for (const p of scanPorts) {
+                    const socket = new net.Socket();
+                    sockets.push(socket);
+                    
+                    socket.once('connect', () => {
+                        clearTimeout(timeout);
+                        clearInterval(interval);
+                        
+                        // Clean up all dangling sockets
+                        for (const s of sockets) s.destroy();
+                        
+                        detectedPort = p;
+                        resolve(true);
+                    });
+                    
+                    socket.once('error', () => {
+                        socket.destroy();
+                    });
+                    
+                    socket.connect(p, internalIp);
+                }
             }, 1000);
         });
 
@@ -166,8 +181,12 @@ export class ShardRunner {
             throw new Error(`Health check timeout for ${containerName}`);
         }
 
-        console.log(`[SHARD_RUNNER] Container ${containerName} passed health check and is READY.`);
+        if (detectedPort !== finalPort) {
+            console.log(`[SHARD_RUNNER] Auto-Discovery: Container ${containerName} is actually listening on ${detectedPort}! (Expected ${finalPort})`);
+        } else {
+            console.log(`[SHARD_RUNNER] Container ${containerName} passed health check and is READY on port ${detectedPort}.`);
+        }
         
-        return { ip: internalIp, port: finalPort };
+        return { ip: internalIp, port: detectedPort };
     }
 }
