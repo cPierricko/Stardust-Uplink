@@ -106,7 +106,7 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
     // Audit storage readiness for every request
     ensureDirs();
 
-    const { name, slug, deploy_method, env_vars } = req.body;
+    const { name, slug, deploy_method, env_vars, gitUrl } = req.body;
     
     if (!slug) {
         return res.status(400).json({ error: 'Slug is required' });
@@ -121,43 +121,52 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
     let has_backend = existing ? existing.has_backend : 0;
 
     try {
-        if (req.file) {
-            // Extract ZIP
-            const zip = new AdmZip(req.file.path);
-            
+        if (req.file || gitUrl) {
             if (fs.existsSync(extractPath)) {
                 fs.rmSync(extractPath, { recursive: true, force: true });
             }
-            
             fs.mkdirSync(extractPath, { recursive: true });
-            zip.extractAllTo(extractPath, true);
 
-            // ZIP Structure Handling (Flattening)
-            const itemsToClean = ['__MACOSX', '.DS_Store'];
-            for (const item of fs.readdirSync(extractPath)) {
-                if (itemsToClean.includes(item)) {
-                    fs.rmSync(path.join(extractPath, item), { recursive: true, force: true });
-                }
-            }
+            if (gitUrl) {
+                // Clone from Github
+                const { execSync } = await import('child_process');
+                console.log(`[SHARDS] Cloning from Git URL: ${gitUrl} for ${appSlug}`);
+                execSync(`git clone --depth 1 ${gitUrl} .`, { cwd: extractPath, stdio: 'pipe' });
+                
+                // Remove .git tracking to isolate shard
+                const gitDirPath = path.join(extractPath, '.git');
+                if (fs.existsSync(gitDirPath)) fs.rmSync(gitDirPath, { recursive: true, force: true });
+                console.log(`[SHARDS] Git clone complete and isolated for ${appSlug}`);
+            } else if (req.file) {
+                // Extract ZIP
+                const zip = new AdmZip(req.file.path);
+                zip.extractAllTo(extractPath, true);
 
-            const remainingItems = fs.readdirSync(extractPath);
-            if (remainingItems.length === 1) {
-                const singleItemPath = path.join(extractPath, remainingItems[0]);
-                if (fs.statSync(singleItemPath).isDirectory()) {
-                    const distItems = fs.readdirSync(singleItemPath);
-                    for (const item of distItems) {
-                        fs.renameSync(path.join(singleItemPath, item), path.join(extractPath, item));
+                // ZIP Structure Handling (Flattening)
+                const itemsToClean = ['__MACOSX', '.DS_Store'];
+                for (const item of fs.readdirSync(extractPath)) {
+                    if (itemsToClean.includes(item)) {
+                        fs.rmSync(path.join(extractPath, item), { recursive: true, force: true });
                     }
-                    fs.rmSync(singleItemPath, { recursive: true });
-                    console.log(`[SHARDS] Flattened nested folder '${remainingItems[0]}' for ${appSlug}`);
+                }
+
+                const remainingItems = fs.readdirSync(extractPath);
+                if (remainingItems.length === 1) {
+                    const singleItemPath = path.join(extractPath, remainingItems[0]);
+                    if (fs.statSync(singleItemPath).isDirectory()) {
+                        const distItems = fs.readdirSync(singleItemPath);
+                        for (const item of distItems) {
+                            fs.renameSync(path.join(singleItemPath, item), path.join(extractPath, item));
+                        }
+                        fs.rmSync(singleItemPath, { recursive: true });
+                        console.log(`[SHARDS] Flattened nested folder '${remainingItems[0]}' for ${appSlug}`);
+                    }
                 }
             }
 
-            // RE-APPLY ENVIRONMENT VARIABLES: Ensure .env is restored after wipe/extract
+            // RE-APPLY ENVIRONMENT VARIABLES: Ensure .env is restored after wipe/extract/clone
             fs.writeFileSync(path.join(extractPath, '.env'), formatToEnv(finalEnvVars));
             console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${path.join(extractPath, '.env')}`);
-
-            // Install dependencies block removed - now handled by ShardBuilder async pipeline
 
         } else {
             // Initialize EMPTY/SHELL shard
@@ -190,8 +199,8 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
         }
 
         // Save to Database
-        // Detect if it has a backend after extraction (IF file was uploaded)
-        if (req.file) {
+        // Detect if it has a backend after extraction/clone
+        if (req.file || gitUrl) {
             has_backend = detectBackend(extractPath) ? 1 : 0;
         }
         
@@ -239,7 +248,7 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
         });
 
         // ASYNC DOCKER BUILD & RUN
-        if (req.file) {
+        if (req.file || gitUrl) {
             (async () => {
                 try {
                     await ShardBuilder.build(extractPath, appSlug);

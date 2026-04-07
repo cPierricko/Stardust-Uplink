@@ -1,6 +1,6 @@
 import { useState, ChangeEvent, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronUp, Radio, HardDrive, Cpu, Terminal } from 'lucide-react';
+import { ChevronDown, ChevronUp, Radio, HardDrive, Cpu, Terminal, Github } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
 import { DeploymentStatus, ApiResponse, ShardUploadResponse } from '../../../../shared/types';
 
@@ -13,6 +13,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
     const [callsign, setCallsign] = useState<string>('');
     const [routingSlug, setRoutingSlug] = useState<string>('');
     const [file, setFile] = useState<File | null>(null);
+    const [gitUrl, setGitUrl] = useState<string>('');
     const [status, setStatus] = useState<string>('');
     const [progress, setProgress] = useState<number>(0);
     const [isExpanded, setIsExpanded] = useState<boolean>(false);
@@ -50,7 +51,14 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
         }, 150);
 
         const fd = new FormData();
-        if (file) fd.append('app', file);
+        if (file) {
+            fd.append('app', file);
+            fd.append('deploy_method', 'manual');
+        } else if (gitUrl) {
+            fd.append('gitUrl', gitUrl);
+            fd.append('deploy_method', 'github');
+        }
+
         fd.append('name', callsign);
         fd.append('slug', routingSlug);
 
@@ -85,9 +93,26 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
     const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
             setFile(e.target.files[0]);
+            setGitUrl(''); // Clear alternative
             if (!callsign) {
                 const name = e.target.files[0].name.replace('.zip', '');
                 setCallsign(name);
+            }
+        }
+    };
+
+    const handleGitUrlChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const url = e.target.value;
+        setGitUrl(url);
+        if (url) {
+            setFile(null); // Clear alternative
+            if (!callsign) {
+                // Try to extract repo name from github URL
+                try {
+                    const parts = url.split('/');
+                    const repoName = parts[parts.length - 1].replace('.git', '');
+                    if (repoName) setCallsign(repoName);
+                } catch { }
             }
         }
     };
@@ -96,6 +121,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
         setCallsign('');
         setRoutingSlug('');
         setFile(null);
+        setGitUrl('');
         setDeploymentState('idle');
         setStatus('');
         setProgress(0);
@@ -213,32 +239,49 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
                                             </div>
                                         </div>
 
-                                        {/* Right Side: File Upload */}
+                                        {/* Right Side: File Upload or Git Link */}
                                         <div className="flex flex-col h-full justify-between gap-4">
-                                            <div className="flex-1">
-                                                <label className="text-[9px] font-mono text-cyan-900 tracking-widest uppercase mb-1.5 block">DATA_BUNDLE_PACKAGE</label>
-                                                <div className="relative border border-dashed border-cyan-900/40 bg-black/40 h-[116px] flex flex-col items-center justify-center text-[10px] text-cyan-900 font-mono hover:border-cyan-400/60 hover:text-cyan-400/80 cursor-pointer transition-all w-full group/upload overflow-hidden"
-                                                    style={{ clipPath: 'polygon(2% 0%, 100% 0%, 100% 90%, 98% 100%, 0% 100%, 0% 10%)' }}>
+                                            <div className="flex-1 space-y-4">
+                                                <div>
+                                                    <label className="text-[9px] font-mono text-cyan-900 tracking-widest uppercase mb-1.5 block">DATA_BUNDLE_PACKAGE</label>
+                                                    <div className="relative border border-dashed border-cyan-900/40 bg-black/40 h-[70px] flex flex-col items-center justify-center text-[10px] text-cyan-900 font-mono hover:border-cyan-400/60 hover:text-cyan-400/80 cursor-pointer transition-all w-full group/upload overflow-hidden"
+                                                        style={{ clipPath: 'polygon(2% 0%, 100% 0%, 100% 85%, 98% 100%, 0% 100%, 0% 15%)' }}>
+                                                        <input 
+                                                            type="file" 
+                                                            onChange={handleFileChange} 
+                                                            accept=".zip" 
+                                                            disabled={isProcessing}
+                                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                                                        />
+                                                        <div className="absolute inset-0 bg-cyan-400/5 w-0 group-hover/upload:w-full transition-all duration-700 ease-out"></div>
+                                                        <span className="relative z-10 tracking-[0.2em] px-4 text-center">
+                                                            {file ? `[ SHARD: ${file.name.toUpperCase()} ]` : '[ SELECT DATA SHARD .ZIP ]'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="relative flex items-center py-1">
+                                                    <div className="flex-grow border-t border-cyan-900/30"></div>
+                                                    <span className="flex-shrink-0 mx-4 text-cyan-900 text-[10px] font-mono">OR</span>
+                                                    <div className="flex-grow border-t border-cyan-900/30"></div>
+                                                </div>
+
+                                                <div className="group/input">
+                                                    <label className="text-[9px] font-mono text-cyan-900 tracking-widest uppercase mb-1.5 block group-focus-within/input:text-cyan-500 transition-colors flex items-center gap-2">
+                                                        <Github size={10} /> PUBLIC_GIT_REPO
+                                                    </label>
                                                     <input 
-                                                        type="file" 
-                                                        onChange={handleFileChange} 
-                                                        accept=".zip" 
+                                                        type="text" 
+                                                        value={gitUrl} 
+                                                        onChange={handleGitUrlChange} 
                                                         disabled={isProcessing}
-                                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                                                        className="w-full bg-black/60 border border-cyan-900/30 text-cyan-400 text-[11px] py-2 px-4 font-mono focus:outline-none focus:border-cyan-500/50 transition-all tracking-widest disabled:opacity-50" 
+                                                        placeholder="https://github.com/user/repo" 
                                                     />
-                                                    <div className="absolute inset-0 bg-cyan-400/5 w-0 group-hover/upload:w-full transition-all duration-700 ease-out"></div>
-                                                    
-                                                    <HardDrive size={24} className={`mb-3 transition-colors ${file ? 'text-cyan-500' : 'text-cyan-900 group-hover/upload:text-cyan-600'}`} />
-                                                    <span className="relative z-10 tracking-[0.2em] px-4 text-center">
-                                                        {file ? `[ SHARD: ${file.name.toUpperCase()} ]` : '[ SELECT DATA SHARD .ZIP ]'}
-                                                    </span>
-                                                    {file && (
-                                                        <span className="text-[8px] mt-1 opacity-40">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                                                    )}
                                                 </div>
                                             </div>
 
-                                            <div className="space-y-3">
+                                            <div className="space-y-3 mt-4">
                                                 <div className="w-full bg-cyan-950/10 border border-cyan-900/30 h-1.5 relative overflow-hidden">
                                                     <motion.div
                                                         className={`absolute top-0 left-0 bottom-0 ${isError ? 'bg-[#ff1a1a]' : 'bg-cyan-500'} shadow-[0_0_10px_rgba(6,182,212,0.3)]`}
@@ -249,7 +292,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
 
                                                 <button
                                                     onClick={doDeploy}
-                                                    disabled={isProcessing || !callsign}
+                                                    disabled={isProcessing || !callsign || (!file && !gitUrl)}
                                                     className={`w-full py-3 ${isProcessing ? 'bg-amber-500/10 border-amber-500 text-amber-500' : 'bg-[#ff1a1a]/5 border-[#ff1a1a]/40 text-[#ff1a1a] hover:bg-[#ff1a1a]/10 hover:border-[#ff1a1a]'} border text-[10px] font-mono tracking-[0.4em] transition-all duration-500 uppercase disabled:opacity-20 disabled:cursor-not-allowed`}
                                                 >
                                                     {isProcessing ? (
@@ -259,7 +302,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
                                                             <span className="w-1 h-1 bg-current animate-bounce [animation-delay:0.4s]"></span>
                                                             TRANSF_INITIATED
                                                         </span>
-                                                    ) : file ? 'Execute Uplink' : 'Initialize Shell'}
+                                                    ) : (file || gitUrl) ? 'Execute Uplink' : 'Initialize Shell'}
                                                 </button>
                                             </div>
                                         </div>
