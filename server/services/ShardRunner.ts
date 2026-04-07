@@ -31,18 +31,46 @@ export class ShardRunner {
         // 2. Prepare Environment Variables and detect PORT
         let finalPort = defaultPort;
         let envArray: string[] = [];
-        try {
-            const parsedEnv = typeof envVarsParam === 'string' ? JSON.parse(envVarsParam) : envVarsParam;
-            if (parsedEnv) {
-                for (const [key, value] of Object.entries(parsedEnv)) {
-                    envArray.push(`${key}=${value}`);
-                    if (key.toUpperCase() === 'PORT') {
-                        finalPort = parseInt(value as string, 10) || 3000;
+        
+        if (envVarsParam) {
+            try {
+                // Legacy: If it looks like JSON, parse it
+                if (typeof envVarsParam === 'string' && envVarsParam.trim().startsWith('{')) {
+                    const parsedEnv = JSON.parse(envVarsParam);
+                    for (const [key, value] of Object.entries(parsedEnv)) {
+                        envArray.push(`${key}=${value}`);
+                        if (key.toUpperCase() === 'PORT') {
+                            finalPort = parseInt(value as string, 10) || 3000;
+                        }
+                    }
+                } else if (typeof envVarsParam === 'string') {
+                    // Modern: string parsing for KEY=VALUE (.env format)
+                    const lines = envVarsParam.split('\n');
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed || trimmed.startsWith('#')) continue;
+                        
+                        const match = trimmed.match(/^([^=]+)=(.*)$/);
+                        if (match) {
+                            const key = match[1].trim();
+                            const value = match[2].trim().replace(/^['"]|['"]$/g, ''); // strip quotes
+                            envArray.push(`${key}=${value}`);
+                            if (key.toUpperCase() === 'PORT') {
+                                finalPort = parseInt(value, 10) || 3000;
+                            }
+                        }
+                    }
+                } else if (typeof envVarsParam === 'object') {
+                    for (const [key, value] of Object.entries(envVarsParam)) {
+                        envArray.push(`${key}=${value}`);
+                        if (key.toUpperCase() === 'PORT') {
+                            finalPort = parseInt(value as string, 10) || 3000;
+                        }
                     }
                 }
+            } catch (err) {
+                console.warn(`[SHARD_RUNNER] Error parsing env vars for ${slug}. Proceeding with defaults.`);
             }
-        } catch (err) {
-            console.warn(`[SHARD_RUNNER] Could not parse env vars as JSON for ${slug}, skipping injection.`);
         }
         
         if (!envArray.some(e => e.toUpperCase().startsWith('PORT='))) {

@@ -261,7 +261,7 @@ jobs:
       - name: Push to Stardust
         run: |
           cd dist && zip -qr ../deploy.zip . && cd ..
-          curl -f -sS --fail-with-body -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+          curl -f -sS -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
             -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
             -F "app=@deploy.zip"`;
 
@@ -282,7 +282,7 @@ jobs:
       - name: Push to Stardust
         run: |
           zip -qr deploy.zip . -x ".git/*" ".github/*" "node_modules/*" "src/*" ".env*"
-          curl -f -sS --fail-with-body -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+          curl -f -sS -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
             -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
             -F "app=@deploy.zip"`;
 
