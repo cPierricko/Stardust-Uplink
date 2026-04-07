@@ -61,7 +61,14 @@ CMD ["tail", "-f", "/dev/null"]
         return new Promise((resolve, reject) => {
             const pack = tar.pack(shardPath);
             
-            docker.buildImage(pack, { t: tag }, (err, response) => {
+            const platform = process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64';
+            docker.buildImage(pack, { 
+                t: tag,
+                buildargs: {
+                    BUILDPLATFORM: platform,
+                    TARGETPLATFORM: platform
+                }
+            }, (err, response) => {
                 if (err) {
                     console.error(`[SHARD_BUILDER] Error starting build for ${slug}:`, err);
                     fs.appendFileSync(logFile, `[ERROR] Build start failed: ${err.message}\n`);
