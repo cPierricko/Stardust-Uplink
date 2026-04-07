@@ -56,7 +56,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
             fd.append('deploy_method', 'manual');
         } else if (gitUrl) {
             fd.append('gitUrl', gitUrl);
-            fd.append('deploy_method', 'github');
+            fd.append('deploy_method', 'auto'); // Auto satisfies the database constraint
         }
 
         fd.append('name', callsign);
