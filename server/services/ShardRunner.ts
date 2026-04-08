@@ -77,21 +77,32 @@ export class ShardRunner {
             envArray.push(`PORT=${finalPort}`);
         }
         
-        // Ensure N8N uses the mapped data volume
-        if (!envArray.some(e => e.toUpperCase().startsWith('N8N_USER_FOLDER='))) {
-            envArray.push(`N8N_USER_FOLDER=/app/data`);
+        // 3. Generic Persistence Environment Variables
+        const mandatoryEnv = {
+            'PERSISTENT_DIR': '/app/data'
+        };
+
+        for (const [key, value] of Object.entries(mandatoryEnv)) {
+            if (!envArray.some(e => e.toUpperCase().startsWith(`${key}=`))) {
+                envArray.push(`${key}=${value}`);
+            }
         }
 
-        // 3. Setup Persistent Volume
-        const persistentPath = path.join(process.cwd(), 'persistent_data', slug);
+        // 4. Setup Persistent Volume (Host side)
+        // Use a relative path for flexibility across OS, but allow override via ENV
+        const hostDataRoot = process.env.SHARD_DATA_PATH || path.join(process.cwd(), 'data');
+        const persistentPath = path.resolve(hostDataRoot, slug);
+
         if (!fs.existsSync(persistentPath)) {
-            fs.mkdirSync(persistentPath, { recursive: true });
+            console.log(`[SHARD_RUNNER] Creating persistence directory: ${persistentPath}`);
+            fs.mkdirSync(persistentPath, { recursive: true, mode: 0o777 });
         }
-        // Grant full access so non-root container users (like node) can write to it
+        
+        // Ensure wide permissions for Docker access
         try {
              fs.chmodSync(persistentPath, 0o777);
         } catch (e) {
-             console.warn(`[SHARD_RUNNER] Could not chmod 777 persistent directory for ${slug}`, e);
+             console.warn(`[SHARD_RUNNER] Warning: Could not chmod 777 persistent directory ${persistentPath}:`, e);
         }
 
         // 3. Create Container
