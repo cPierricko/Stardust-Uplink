@@ -57,6 +57,9 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
         } else if (gitUrl) {
             fd.append('gitUrl', gitUrl);
             fd.append('deploy_method', 'auto'); // Auto satisfies the database constraint
+        } else {
+            // Case for Shell / Empty Shard
+            fd.append('deploy_method', 'manual');
         }
 
         fd.append('name', callsign);
@@ -292,7 +295,7 @@ export default function DeploymentModule({ initialToken, onSuccess }: Deployment
 
                                                 <button
                                                     onClick={doDeploy}
-                                                    disabled={isProcessing || !callsign || (!file && !gitUrl)}
+                                                    disabled={isProcessing || !callsign}
                                                     className={`w-full py-3 ${isProcessing ? 'bg-amber-500/10 border-amber-500 text-amber-500' : 'bg-[#ff1a1a]/5 border-[#ff1a1a]/40 text-[#ff1a1a] hover:bg-[#ff1a1a]/10 hover:border-[#ff1a1a]'} border text-[10px] font-mono tracking-[0.4em] transition-all duration-500 uppercase disabled:opacity-20 disabled:cursor-not-allowed`}
                                                 >
                                                     {isProcessing ? (
