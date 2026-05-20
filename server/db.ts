@@ -136,6 +136,19 @@ db.exec(`
   );
 `);
 
+// System Templates / Resources (Metadata for files in TEMPLATES_DIR)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS system_templates (
+    id TEXT PRIMARY KEY,
+    filename TEXT UNIQUE NOT NULL,
+    description TEXT,
+    is_text BOOLEAN DEFAULT 1,
+    size_bytes INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');

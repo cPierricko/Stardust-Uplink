@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trash2, Save, Copy, Check, X, Terminal, AlertTriangle, Cpu, ChevronDown, ChevronUp, Layers, GitBranch, Globe, ShieldOff, Plus, Zap, Users } from 'lucide-react';
+import { Trash2, Save, Copy, Check, X, Terminal, AlertTriangle, Cpu, ChevronDown, ChevronUp, Layers, GitBranch, Globe, ShieldOff, Plus, Zap, Users, Download, FileText, Archive } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
 import { Shard, ApiResponse } from '../../../../shared/types';
 
@@ -53,6 +53,10 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
     const [operators, setOperators] = useState<any[]>([]);
     const [showAccess, setShowAccess] = useState(false);
     const [selectedOperator, setSelectedOperator] = useState<string>('');
+
+    // Resources
+    const [resources, setResources] = useState<any[]>([]);
+    const [showResources, setShowResources] = useState(false);
 
     const fetchStatus = async () => {
         try {
@@ -148,6 +152,24 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
         } catch (err) {
             console.error(err);
         }
+    };
+
+    const fetchResources = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/templates`, { credentials: 'include' });
+            const data = await res.json();
+            if (data.success) setResources(data.data);
+        } catch (err) {
+            console.error('Failed to fetch resources', err);
+        }
+    };
+
+    useEffect(() => {
+        if (showResources) fetchResources();
+    }, [showResources]);
+
+    const handleDownloadResource = (id: string) => {
+        window.open(`${API_BASE}/templates/${id}/download`, '_blank');
     };
 
     useEffect(() => {
@@ -996,6 +1018,61 @@ ANOTHER_KEY=VALUE"
                                             </div>
                                         </div>
                                     )}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+
+                {/* ── Resources Panel ── */}
+                <div className="border-t border-cyan-dark/30 pt-4">
+                    <button
+                        onClick={() => setShowResources(!showResources)}
+                        className="flex items-center gap-2 w-full text-left text-cyan-400 font-mono text-[10px] tracking-widest hover:text-cyan-300 transition-colors"
+                    >
+                        <Download size={12} className={showResources ? "text-cyan-300" : "text-cyan-600"} />
+                        <span>RESSOURCES & TUTORIELS</span>
+                        {showResources ? <ChevronUp size={12} className="ml-auto" /> : <ChevronDown size={12} className="ml-auto" />}
+                    </button>
+
+                    <AnimatePresence>
+                        {showResources && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden mt-3"
+                            >
+                                <div className="p-3 bg-black/40 border-x border-b border-cyan-900/30 space-y-3">
+                                    <p className="text-[8px] font-mono text-cyan-800 leading-relaxed">
+                                        Fichiers modèles et guides de déploiement mis à disposition par l'administrateur.
+                                    </p>
+
+                                    <div className="space-y-2">
+                                        {resources.length === 0 ? (
+                                            <p className="text-[8px] font-mono text-cyan-900 italic p-2 border border-dashed border-cyan-900/30 text-center">Aucune ressource disponible</p>
+                                        ) : (
+                                            resources.map(res => (
+                                                <div key={res.id} className="flex items-center justify-between p-2 bg-black/60 border border-cyan-900/30 group hover:border-cyan-700/50 transition-colors">
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-center gap-1.5">
+                                                            {res.is_text ? <FileText size={10} className="text-cyan-600" /> : <Archive size={10} className="text-amber-600" />}
+                                                            <span className="text-[9px] font-mono text-cyan-500 font-bold">{res.filename}</span>
+                                                        </div>
+                                                        {res.description && (
+                                                            <span className="text-[8px] font-mono text-cyan-800 mt-0.5">{res.description}</span>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleDownloadResource(res.id)}
+                                                        className="px-2 py-1 text-[8px] font-mono border border-cyan-900/40 text-cyan-600 hover:text-cyan-400 hover:border-cyan-400/50 transition-all flex items-center gap-1 bg-cyan-950/20"
+                                                    >
+                                                        <Download size={10} /> OBTENIR
+                                                    </button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
                             </motion.div>
                         )}

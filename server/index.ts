@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import deployRoutes from './routes/deploy.js';
+import templatesRoutes from './routes/templates.js';
 import shardsRoutes, { SHARDS_DIR } from './routes/shards.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
@@ -282,6 +283,9 @@ app.use('/api/auth', authRoutes);
 
 // Protected Admin & System Routes
 app.use('/api/admin', adminRoutes);
+
+// Templates & Resources Routes
+app.use('/api/templates', templatesRoutes);
 
 // Deployment Routes (Internal protection via Deploy Token)
 app.use('/api/deploy', (deployRoutes as any).router);
