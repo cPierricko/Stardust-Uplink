@@ -165,8 +165,8 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
     };
 
     useEffect(() => {
-        if (showResources) fetchResources();
-    }, [showResources]);
+        fetchResources();
+    }, []);
 
     const handleDownloadResource = (id: string) => {
         window.open(`${API_BASE}/templates/${id}/download`, '_blank');
@@ -407,9 +407,7 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
         } catch { showNotification('SYSTEM_ERROR', 'error'); }
     };
 
-    const [workflowType, setWorkflowType] = useState<'frontend' | 'fullstack'>(shard.has_backend ? 'fullstack' : 'frontend');
-
-    const workflowFrontend = `name: Stardust Deploy — Frontend
+    const defaultFrontend = `name: Stardust Deploy — Frontend
 on:
   push:
     branches: [ main ]
@@ -430,7 +428,7 @@ jobs:
             -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
             -F "app=@deploy.zip"`;
 
-    const workflowFullstack = `name: Stardust Deploy — Full-Stack
+    const defaultFullstack = `name: Stardust Deploy — Full-Stack
 on:
   push:
     branches: [ main ]
@@ -451,7 +449,41 @@ jobs:
             -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
             -F "app=@deploy.zip"`;
 
-    const workflowTemplate = workflowType === 'frontend' ? workflowFrontend : workflowFullstack;
+    const [workflowType, setWorkflowType] = useState<'frontend' | 'fullstack'>(shard.has_backend ? 'fullstack' : 'frontend');
+    const [workflowFrontendTpl, setWorkflowFrontendTpl] = useState(defaultFrontend);
+    const [workflowFullstackTpl, setWorkflowFullstackTpl] = useState(defaultFullstack);
+
+    // When resources are fetched, extract the workflow templates content
+    useEffect(() => {
+        const fetchTemplatesContent = async () => {
+            const feTpl = resources.find(r => r.filename === 'workflow-frontend.yml');
+            const fsTpl = resources.find(r => r.filename === 'workflow-fullstack.yml');
+            
+            if (feTpl) {
+                try {
+                    const res = await fetch(`${API_BASE}/templates/${feTpl.id}/content`, { credentials: 'include' });
+                    const data = await res.json();
+                    if (data.success) setWorkflowFrontendTpl(data.content);
+                } catch (e) { /* ignore */ }
+            } else {
+                setWorkflowFrontendTpl(defaultFrontend);
+            }
+
+            if (fsTpl) {
+                try {
+                    const res = await fetch(`${API_BASE}/templates/${fsTpl.id}/content`, { credentials: 'include' });
+                    const data = await res.json();
+                    if (data.success) setWorkflowFullstackTpl(data.content);
+                } catch (e) { /* ignore */ }
+            } else {
+                setWorkflowFullstackTpl(defaultFullstack);
+            }
+        };
+
+        fetchTemplatesContent();
+    }, [resources]);
+
+    const workflowTemplate = workflowType === 'frontend' ? workflowFrontendTpl : workflowFullstackTpl;
 
     const copyWorkflow = () => {
         navigator.clipboard.writeText(workflowTemplate);
@@ -785,7 +817,7 @@ ANOTHER_KEY=VALUE"
                 </div>
 
                 {/* Docker Compose Config — shown only for compose shards */}
-                {shard.compose_mode && (
+                {!!shard.compose_mode && (
                     <div className="pt-2 border-t border-cyan-900/20 space-y-2">
                         <label className="text-[9px] font-mono text-cyan-900 tracking-widest uppercase flex items-center gap-2">
                             <Layers size={10} /> COMPOSE_CONFIG

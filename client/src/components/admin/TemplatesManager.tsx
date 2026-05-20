@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Download, Upload, Trash2, Edit3, Plus, Save, X, RefreshCw, Archive } from 'lucide-react';
+import { FileText, Download, Upload, Trash2, Edit3, Plus, Save, X, RefreshCw, Archive, Check } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
 
 interface Template {
@@ -16,6 +16,7 @@ interface Template {
 export default function TemplatesManager() {
     const [templates, setTemplates] = useState<Template[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
     // Edit Text Mode
     const [isEditingText, setIsEditingText] = useState(false);
@@ -60,13 +61,15 @@ export default function TemplatesManager() {
         window.open(`${API_BASE}/templates/${id}/download`, '_blank');
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this resource?')) return;
+    const handleDelete = async (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        e.preventDefault();
         try {
             await fetch(`${API_BASE}/templates/${id}`, {
                 method: 'DELETE',
                 credentials: 'include'
             });
+            setConfirmDeleteId(null);
             loadTemplates();
         } catch (err) {
             console.error(err);
@@ -264,11 +267,23 @@ export default function TemplatesManager() {
                                 <span className="text-xs font-bold font-mono text-gray-200">{t.filename}</span>
                             </div>
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                {t.is_text && (
-                                    <button onClick={() => startEditText(t)} className="p-1 text-cyan-600 hover:text-[#00d4ff]"><Edit3 size={12} /></button>
+                                {confirmDeleteId === t.id ? (
+                                    <div className="flex items-center gap-1 bg-empire-red/20 border border-empire-red/30 px-1 py-0.5">
+                                        <span className="text-[8px] font-mono text-empire-red tracking-widest px-1">SÛR ?</span>
+                                        <button onClick={(e) => handleDelete(e, t.id)} className="p-0.5 text-empire-red hover:bg-empire-red/20"><Check size={12} /></button>
+                                        <button onClick={() => setConfirmDeleteId(null)} className="p-0.5 text-gray-400 hover:text-white hover:bg-white/10"><X size={12} /></button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {t.is_text && (
+                                            <button onClick={() => startEditText(t)} className="p-1 text-cyan-600 hover:text-[#00d4ff]"><Edit3 size={12} /></button>
+                                        )}
+                                        <button onClick={() => handleDownload(t.id)} className="p-1 text-cyan-600 hover:text-[#00d4ff]"><Download size={12} /></button>
+                                        {!t.filename.startsWith('workflow-') && (
+                                            <button onClick={() => setConfirmDeleteId(t.id)} className="p-1 text-empire-red/60 hover:text-empire-red"><Trash2 size={12} /></button>
+                                        )}
+                                    </>
                                 )}
-                                <button onClick={() => handleDownload(t.id)} className="p-1 text-cyan-600 hover:text-[#00d4ff]"><Download size={12} /></button>
-                                <button onClick={() => handleDelete(t.id)} className="p-1 text-empire-red/60 hover:text-empire-red"><Trash2 size={12} /></button>
                             </div>
                         </div>
                         {t.description && (

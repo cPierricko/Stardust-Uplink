@@ -166,6 +166,80 @@ function runFirstBootCheck() {
   }
 }
 
+// Seed Default System Templates
+import fs from 'fs';
+import { TEMPLATES_DIR } from './config/paths.js';
+
+function seedTemplates() {
+  const defaultTemplates = [
+    {
+      filename: 'workflow-frontend.yml',
+      description: 'Template Github Actions pour un projet Frontend uniquement (Vite, React, etc.)',
+      content: `name: Stardust Deploy — Frontend
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - name: Push to Stardust
+        run: |
+          cd dist && zip -qr ../deploy.zip . && cd ..
+          curl -f -sS -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+            -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
+            -F "app=@deploy.zip"`
+    },
+    {
+      filename: 'workflow-fullstack.yml',
+      description: 'Template Github Actions pour un projet Full-Stack (Node.js, Express, etc.)',
+      content: `name: Stardust Deploy — Full-Stack
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build --if-present
+      - name: Push to Stardust
+        run: |
+          zip -qr deploy.zip . -x ".git/*" ".github/*" "node_modules/*" "src/*" ".env*"
+          curl -f -sS -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+            -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
+            -F "app=@deploy.zip"`
+    }
+  ];
+
+  for (const t of defaultTemplates) {
+    const existing = db.prepare('SELECT id FROM system_templates WHERE filename = ?').get(t.filename);
+    if (!existing) {
+      const filePath = path.join(TEMPLATES_DIR, t.filename);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, t.content, 'utf-8');
+      }
+      const stats = fs.statSync(filePath);
+      const insertStmt = db.prepare(`
+        INSERT INTO system_templates (id, filename, description, is_text, size_bytes)
+        VALUES (?, ?, ?, 1, ?)
+      `);
+      insertStmt.run(crypto.randomUUID(), t.filename, t.description, stats.size);
+    }
+  }
+}
+
 runFirstBootCheck();
+seedTemplates();
 
 export default db;

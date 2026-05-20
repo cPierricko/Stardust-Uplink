@@ -72,7 +72,7 @@ router.get('/:id/download', requireAuth, (req, res) => {
 });
 
 // 4. CREATE OR UPDATE TEXT TEMPLATE (Admin only)
-router.post('/text', requireAdmin, (req, res) => {
+router.post('/text', requireAuth, requireAdmin, (req, res) => {
     try {
         const { id, filename, description, content } = req.body;
         
@@ -109,7 +109,7 @@ router.post('/text', requireAdmin, (req, res) => {
 });
 
 // 5. UPLOAD BINARY TEMPLATE (Admin only)
-router.post('/upload', requireAdmin, upload.single('file'), (req, res) => {
+router.post('/upload', requireAuth, requireAdmin, upload.single('file'), (req, res) => {
     try {
         const { description } = req.body;
         const file = req.file;
@@ -151,13 +151,17 @@ router.post('/upload', requireAdmin, upload.single('file'), (req, res) => {
 });
 
 // 6. DELETE TEMPLATE (Admin only)
-router.delete('/:id', requireAdmin, (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
     try {
         const { id } = req.params;
         const stmt = db.prepare('SELECT filename FROM system_templates WHERE id = ?');
         const template = stmt.get(id) as any;
 
         if (template) {
+            if (template.filename.startsWith('workflow-')) {
+                return res.status(403).json({ success: false, error: 'System templates cannot be deleted.' });
+            }
+
             const filePath = path.join(TEMPLATES_DIR, template.filename);
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
