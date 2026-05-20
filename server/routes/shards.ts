@@ -13,11 +13,15 @@ import { ShardBuilder, detectComposeFile, parseComposeServices } from '../servic
 import { ShardRunner } from '../services/ShardRunner.js';
 import { ShardLogCollector } from '../services/ShardLogCollector.js';
 import Docker from 'dockerode';
+import { requireAdmin, requireShardOwnership } from '../middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
+
+// Applique le check de propriété/accès à toutes les routes utilisant :id
+router.param('id', requireShardOwnership);
 
 
 // Helper to parse .env format to JSON string record
@@ -573,8 +577,24 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
  */
 router.get('/', (req: Request, res: Response) => {
     try {
-        const stmt = db.prepare('SELECT * FROM apps ORDER BY name ASC');
-        const shards = stmt.all() as any[];
+        const user = (req as any).user;
+        let shards = [];
+
+        if (user && user.role === 'administrator') {
+            const stmt = db.prepare('SELECT * FROM apps ORDER BY name ASC');
+            shards = stmt.all() as any[];
+        } else if (user) {
+            // Operator: only shards they have access to
+            const stmt = db.prepare(`
+                SELECT a.* FROM apps a
+                JOIN user_shard_access usa ON usa.shard_slug = a.slug
+                WHERE usa.user_id = ?
+                ORDER BY a.name ASC
+            `);
+            shards = stmt.all(user.id) as any[];
+        } else {
+            return res.status(401).json({ error: 'Authentication required' });
+        }
 
         // Enhance shards with actual .env file content if present
         const enhancedShards = shards.map(shard => {
@@ -897,7 +917,7 @@ router.post('/:id/command', async (req: Request, res: Response) => {
  * GET /api/shards/:id/public-routes
  * List all public routes for a shard.
  */
-router.get('/:id/public-routes', (req: Request, res: Response) => {
+router.get('/:id/public-routes', requireAdmin, (req: Request, res: Response) => {
     const { id } = req.params;
     try {
         const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
@@ -917,7 +937,7 @@ router.get('/:id/public-routes', (req: Request, res: Response) => {
  * POST /api/shards/:id/public-routes
  * Create a new public route for a shard.
  */
-router.post('/:id/public-routes', (req: Request, res: Response) => {
+router.post('/:id/public-routes', requireAdmin, (req: Request, res: Response) => {
     const { id } = req.params;
     const { path_pattern, method = '*', rate_limit_rpm = 60, description = '' } = req.body;
 
@@ -958,7 +978,7 @@ router.post('/:id/public-routes', (req: Request, res: Response) => {
  * PATCH /api/shards/:id/public-routes/:routeId
  * Update an existing public route (rate limit or description).
  */
-router.patch('/:id/public-routes/:routeId', (req: Request, res: Response) => {
+router.patch('/:id/public-routes/:routeId', requireAdmin, (req: Request, res: Response) => {
     const { id, routeId } = req.params;
     const { rate_limit_rpm, description, method, path_pattern } = req.body;
 
@@ -993,7 +1013,7 @@ router.patch('/:id/public-routes/:routeId', (req: Request, res: Response) => {
  * DELETE /api/shards/:id/public-routes/:routeId
  * Delete a public route.
  */
-router.delete('/:id/public-routes/:routeId', (req: Request, res: Response) => {
+router.delete('/:id/public-routes/:routeId', requireAdmin, (req: Request, res: Response) => {
     const { id, routeId } = req.params;
     try {
         const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
@@ -1008,6 +1028,79 @@ router.delete('/:id/public-routes/:routeId', (req: Request, res: Response) => {
         }
 
         res.json({ success: true, message: 'PUBLIC_ROUTE_DELETED' });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  USER ACCESS MANAGEMENT (Admin Only)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/shards/:id/access
+ * List operators who have access to this shard.
+ */
+router.get('/:id/access', requireAdmin, (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        // Get all operators and whether they have access
+        const users = db.prepare(`
+            SELECT u.id, u.username, 
+                   CASE WHEN usa.user_id IS NOT NULL THEN 1 ELSE 0 END as has_access
+            FROM users u
+            LEFT JOIN user_shard_access usa ON u.id = usa.user_id AND usa.shard_slug = ?
+            WHERE u.role = 'operator'
+            ORDER BY u.username ASC
+        `).all(shard.slug) as any[];
+
+        res.json({ success: true, data: users });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/shards/:id/access
+ * Grant access to an operator for this shard.
+ */
+router.post('/:id/access', requireAdmin, (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { user_id } = req.body;
+
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        db.prepare(`
+            INSERT OR IGNORE INTO user_shard_access (user_id, shard_slug)
+            VALUES (?, ?)
+        `).run(user_id, shard.slug);
+
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /api/shards/:id/access/:userId
+ * Revoke access from an operator for this shard.
+ */
+router.delete('/:id/access/:userId', requireAdmin, (req: Request, res: Response) => {
+    const { id, userId } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        db.prepare('DELETE FROM user_shard_access WHERE user_id = ? AND shard_slug = ?').run(userId, shard.slug);
+
+        res.json({ success: true });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }

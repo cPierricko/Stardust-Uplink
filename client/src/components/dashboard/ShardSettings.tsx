@@ -1,17 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trash2, Save, Copy, Check, X, Terminal, AlertTriangle, Cpu, ChevronDown, ChevronUp, Layers, GitBranch, Globe, ShieldOff, Plus, Zap } from 'lucide-react';
+import { Trash2, Save, Copy, Check, X, Terminal, AlertTriangle, Cpu, ChevronDown, ChevronUp, Layers, GitBranch, Globe, ShieldOff, Plus, Zap, Users } from 'lucide-react';
 import { API_BASE } from '../../config/constants';
 import { Shard, ApiResponse } from '../../../../shared/types';
 
 interface ShardSettingsProps {
     shard: Shard;
+    user: any;
     onClose: () => void;
     onUpdate: () => void;
     onDelete: () => void;
 }
 
-export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: ShardSettingsProps) {
+export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete }: ShardSettingsProps) {
     const [envVars, setEnvVars] = useState(shard.env_vars === '{}' ? '' : shard.env_vars);
 
     const [token, setToken] = useState<string | null>(null);
@@ -47,6 +48,11 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
     const [newRoute, setNewRoute] = useState({ path_pattern: '', method: '*', rate_limit_rpm: 60, description: '' });
     const [isAddingRoute, setIsAddingRoute] = useState(false);
     const [isCreatingRoute, setIsCreatingRoute] = useState(false);
+
+    // User Access
+    const [operators, setOperators] = useState<any[]>([]);
+    const [showAccess, setShowAccess] = useState(false);
+    const [selectedOperator, setSelectedOperator] = useState<string>('');
 
     const fetchStatus = async () => {
         try {
@@ -94,6 +100,55 @@ export default function ShardSettings({ shard, onClose, onUpdate, onDelete }: Sh
     useEffect(() => {
         if (showPublicRoutes) fetchPublicRoutes();
     }, [showPublicRoutes, shard.id]);
+
+    const fetchOperators = async () => {
+        if (user?.role !== 'administrator') return;
+        try {
+            const res = await fetch(`${API_BASE}/shards/${shard.id}/access`, { credentials: 'include' });
+            const data = await res.json();
+            if (data.success) setOperators(data.data);
+        } catch (err) {
+            console.error('Failed to fetch operators', err);
+        }
+    };
+
+    useEffect(() => {
+        if (showAccess) fetchOperators();
+    }, [showAccess, shard.id]);
+
+    const handleGrantAccess = async () => {
+        if (!selectedOperator) return;
+        try {
+            const res = await fetch(`${API_BASE}/shards/${shard.id}/access`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: selectedOperator }),
+                credentials: 'include'
+            });
+            if (res.ok) {
+                fetchOperators();
+                setSelectedOperator('');
+                showNotification('Accès accordé');
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleRevokeAccess = async (userId: string) => {
+        try {
+            const res = await fetch(`${API_BASE}/shards/${shard.id}/access/${userId}`, {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+            if (res.ok) {
+                fetchOperators();
+                showNotification('Accès révoqué');
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
 
     useEffect(() => {
         // Fetch token on mount
@@ -946,6 +1001,76 @@ ANOTHER_KEY=VALUE"
                         )}
                     </AnimatePresence>
                 </div>
+
+                {/* ── User Access Panel ── */}
+                {user?.role === 'administrator' && (
+                    <div className="border-t border-cyan-dark/30 pt-4">
+                        <button
+                            onClick={() => setShowAccess(!showAccess)}
+                            className="flex items-center gap-2 w-full text-left text-cyan-400 font-mono text-[10px] tracking-widest hover:text-cyan-300 transition-colors"
+                        >
+                            <Users size={12} className={showAccess ? "text-cyan-300" : "text-cyan-600"} />
+                            <span>ACCÈS UTILISATEURS</span>
+                            {showAccess ? <ChevronUp size={12} className="ml-auto" /> : <ChevronDown size={12} className="ml-auto" />}
+                        </button>
+
+                        <AnimatePresence>
+                            {showAccess && (
+                                <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    className="overflow-hidden mt-3"
+                                >
+                                    <div className="p-3 bg-black/40 border-x border-b border-cyan-900/30 space-y-3">
+                                        <p className="text-[8px] font-mono text-cyan-800 leading-relaxed">
+                                            Seuls les administrateurs et les opérateurs listés ici ont accès à ce shard.
+                                        </p>
+
+                                        {/* Operators list */}
+                                        <div className="space-y-1">
+                                            {operators.filter(o => o.has_access).map(op => (
+                                                <div key={op.id} className="flex items-center justify-between p-1.5 bg-black/60 border border-cyan-900/30 group hover:border-cyan-700/50 transition-colors">
+                                                    <span className="text-[9px] font-mono text-cyan-500">{op.username}</span>
+                                                    <button
+                                                        onClick={() => handleRevokeAccess(op.id)}
+                                                        className="p-1 text-red-900 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                                    >
+                                                        <Trash2 size={10} />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {operators.filter(o => o.has_access).length === 0 && (
+                                                <p className="text-[8px] font-mono text-cyan-900 italic p-2 border border-dashed border-cyan-900/30 text-center">Aucun opérateur assigné</p>
+                                            )}
+                                        </div>
+
+                                        {/* Add operator */}
+                                        <div className="flex gap-2 items-center mt-2 pt-3 border-t border-cyan-900/30">
+                                            <select
+                                                value={selectedOperator}
+                                                onChange={e => setSelectedOperator(e.target.value)}
+                                                className="flex-1 bg-black/60 border border-cyan-900/40 text-cyan-400 font-mono text-[9px] px-2 py-1.5 focus:outline-none focus:border-cyan-500/50"
+                                            >
+                                                <option value="" className="bg-[#0a0f18]">Sélectionner un opérateur...</option>
+                                                {operators.filter(o => !o.has_access).map(op => (
+                                                    <option key={op.id} value={op.id} className="bg-[#0a0f18]">{op.username}</option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                onClick={handleGrantAccess}
+                                                disabled={!selectedOperator}
+                                                className="px-3 py-1.5 bg-cyan-500/10 border border-cyan-500/40 text-cyan-500 font-mono text-[8px] tracking-widest hover:bg-cyan-500/20 transition-all disabled:opacity-30 disabled:hover:bg-transparent"
+                                            >
+                                                AJOUTER
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                )}
 
                 {/* Danger Zone */}
                 <div className="pt-2 border-t border-red-900/20">

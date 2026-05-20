@@ -67,6 +67,7 @@ function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
               <AppShard 
                 key={shard.id} 
                 shard={shard} 
+                user={user}
                 onAccess={(s) => {
                   const protocol = window.location.protocol;
                   const hostname = window.location.hostname;
@@ -86,7 +87,9 @@ function Dashboard({ user, shards, fetchShards, setAdminOpen }) {
             ))}
             {shards.length === 0 && (
               <div className="col-span-full border-2 border-dashed border-cyan-dark/30 p-12 text-center text-gray-500 font-mono text-sm tracking-widest">
-                NO ACTIVE SHARDS DETECTED. INITIALIZE NEW UPLINK.
+                {user?.role === 'administrator' 
+                  ? 'NO ACTIVE SHARDS DETECTED. INITIALIZE NEW UPLINK.'
+                  : 'AUCUN SHARD ASSIGNÉ. CONTACTEZ VOTRE ADMINISTRATEUR.'}
               </div>
             )}
           </motion.div>

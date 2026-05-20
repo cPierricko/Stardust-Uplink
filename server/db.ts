@@ -124,6 +124,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_public_routes_slug ON shard_public_routes(shard_slug);
 `);
 
+// User Shard Access table (Operator permissions)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_shard_access (
+    user_id TEXT,
+    shard_slug TEXT,
+    granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, shard_slug),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(shard_slug) REFERENCES apps(slug) ON DELETE CASCADE
+  );
+`);
+
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');

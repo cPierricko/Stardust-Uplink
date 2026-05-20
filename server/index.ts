@@ -175,7 +175,47 @@ const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
     }
 
     try {
-        jwt.verify(token, jwtSecret);
+        const decoded = jwt.verify(token, jwtSecret) as any;
+        
+        // ── Check Operator Shard Access ───────────────────────────────────────
+        if (decoded && decoded.role === 'operator') {
+            const hasAccess = db.prepare('SELECT 1 FROM user_shard_access WHERE user_id = ? AND shard_slug = ?').get(decoded.id, slug);
+            if (!hasAccess) {
+                console.warn(`[AUTH] FORBIDDEN: Operator ${decoded.username} attempted to access shard ${slug} via proxy`);
+                
+                // Return 403 for API or HTML for browser
+                if (req.url.startsWith('/api')) {
+                    return res.status(403).json({ error: 'Access denied to this shard' });
+                }
+                
+                const host = req.get('host') || '';
+                const parts = host.split('.');
+                const baseDomain = parts.length >= 2 ? parts.slice(-2).join('.') : 'rogue-one.cloud';
+                const dashboardUrl = host.includes('localhost') ? 'http://localhost:3000' : `https://${baseDomain}`;
+                
+                return res.status(403).send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>403 Forbidden</title>
+                        <style>
+                            body { background: #0a0f18; color: #ef4444; font-family: monospace; padding: 3rem; text-align: center; }
+                            h1 { font-size: 2rem; margin-bottom: 1rem; border-bottom: 1px solid #7f1d1d; padding-bottom: 1rem; display: inline-block; }
+                            p { color: #9ca3af; margin-bottom: 2rem; }
+                            a { display: inline-block; padding: 0.5rem 1rem; border: 1px solid #14b8a6; color: #14b8a6; text-decoration: none; transition: all 0.2s; }
+                            a:hover { background: #14b8a6; color: #000; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>403_ACCESS_DENIED</h1>
+                        <p>Vous n'avez pas l'autorisation d'accéder au shard <strong>${slug}</strong>.</p>
+                        <a href="${dashboardUrl}">RETURN_TO_DASHBOARD</a>
+                    </body>
+                    </html>
+                `);
+            }
+        }
+
         next();
     } catch (err) {
         if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Invalid token' });

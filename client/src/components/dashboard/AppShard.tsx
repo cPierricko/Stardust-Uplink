@@ -10,9 +10,10 @@ export interface AppShardProps {
     onAccess: (shard: Shard) => void;
     onUpdate: () => void;
     onDelete: () => void;
+    user: any;
 }
 
-export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppShardProps) {
+export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: AppShardProps) {
     const [showSettings, setShowSettings] = useState(false);
     const [showLogs, setShowLogs] = useState(false);
     const [showUnderConstruction, setShowUnderConstruction] = useState(false);
@@ -70,15 +71,17 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppSha
                 <div className="flex justify-between items-start mb-2">
                     <h3 className="text-sm font-bold text-white tracking-widest filter drop-shadow-[0_0_2px_#fff]">{'>>'} SHARD: {shard.name}</h3>
                     <div className="flex gap-2">
-                        <button 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowSettings(true);
-                            }}
-                            className="p-1.5 border border-cyan-900/30 text-cyan-800 hover:text-cyan-400 hover:border-cyan-400/50 transition-all bg-cyan-950/20"
-                        >
-                            <Settings size={14} />
-                        </button>
+                        {user?.role === 'administrator' && (
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowSettings(true);
+                                }}
+                                className="p-1.5 border border-cyan-900/30 text-cyan-800 hover:text-cyan-400 hover:border-cyan-400/50 transition-all bg-cyan-950/20"
+                            >
+                                <Settings size={14} />
+                            </button>
+                        )}
                     </div>
                 </div>
                 <div className="w-full h-[1px] bg-gradient-to-r from-[#00d4ff]/50 to-transparent mb-4"></div>
@@ -235,6 +238,7 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete }: AppSha
                         >
                             <ShardSettings 
                                 shard={shard} 
+                                user={user}
                                 onClose={() => setShowSettings(false)} 
                                 onUpdate={onUpdate}
                                 onDelete={onDelete}
