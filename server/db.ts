@@ -99,6 +99,31 @@ if (!columnNames.includes('internal_ip')) {
     db.exec('ALTER TABLE apps ADD COLUMN internal_ip TEXT');
 }
 
+if (!columnNames.includes('compose_mode')) {
+    console.log('[DB_MIGRATION] Adding column compose_mode to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN compose_mode INTEGER DEFAULT 0');
+}
+
+if (!columnNames.includes('compose_main_service')) {
+    console.log('[DB_MIGRATION] Adding column compose_main_service to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN compose_main_service TEXT');
+}
+
+// Public routes table for webhook & external access
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shard_public_routes (
+    id TEXT PRIMARY KEY,
+    shard_slug TEXT NOT NULL,
+    path_pattern TEXT NOT NULL,
+    method TEXT DEFAULT '*',
+    rate_limit_rpm INTEGER DEFAULT 60,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(shard_slug) REFERENCES apps(slug) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_public_routes_slug ON shard_public_routes(shard_slug);
+`);
+
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');

@@ -6,6 +6,9 @@ import path from 'path';
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 export class ShardRunner {
+    /**
+     * Boot a standard single-container shard (built from Dockerfile).
+     */
     static async boot(slug: string, envVarsParam: any, defaultPort: number = 3000): Promise<{ ip: string; port: number }> {
         console.log(`[SHARD_RUNNER] Booting container for ${slug}...`);
         
@@ -34,7 +37,6 @@ export class ShardRunner {
         
         if (envVarsParam) {
             try {
-                // Legacy: If it looks like JSON, parse it
                 if (typeof envVarsParam === 'string' && envVarsParam.trim().startsWith('{')) {
                     const parsedEnv = JSON.parse(envVarsParam);
                     for (const [key, value] of Object.entries(parsedEnv)) {
@@ -44,16 +46,14 @@ export class ShardRunner {
                         }
                     }
                 } else if (typeof envVarsParam === 'string') {
-                    // Modern: string parsing for KEY=VALUE (.env format)
                     const lines = envVarsParam.split('\n');
                     for (const line of lines) {
                         const trimmed = line.trim();
                         if (!trimmed || trimmed.startsWith('#')) continue;
-                        
                         const match = trimmed.match(/^([^=]+)=(.*)$/);
                         if (match) {
                             const key = match[1].trim();
-                            const value = match[2].trim().replace(/^['"]|['"]$/g, ''); // strip quotes
+                            const value = match[2].trim().replace(/^['"](.*)['""]$/, '$1');
                             envArray.push(`${key}=${value}`);
                             if (key.toUpperCase() === 'PORT') {
                                 finalPort = parseInt(value, 10) || 3000;
@@ -77,35 +77,22 @@ export class ShardRunner {
             envArray.push(`PORT=${finalPort}`);
         }
         
-        // 3. Generic Persistence Environment Variables
-        const mandatoryEnv = {
-            'PERSISTENT_DIR': '/app/data'
-        };
-
-        for (const [key, value] of Object.entries(mandatoryEnv)) {
-            if (!envArray.some(e => e.toUpperCase().startsWith(`${key}=`))) {
-                envArray.push(`${key}=${value}`);
-            }
+        if (!envArray.some(e => e.toUpperCase().startsWith('N8N_USER_FOLDER='))) {
+            envArray.push(`N8N_USER_FOLDER=/app/data`);
         }
 
-        // 4. Setup Persistent Volume (Host side)
-        // Use a relative path for flexibility across OS, but allow override via ENV
-        const hostDataRoot = process.env.SHARD_DATA_PATH || path.join(process.cwd(), 'data');
-        const persistentPath = path.resolve(hostDataRoot, slug);
-
+        // 3. Setup Persistent Volume
+        const persistentPath = path.join(process.cwd(), 'persistent_data', slug);
         if (!fs.existsSync(persistentPath)) {
-            console.log(`[SHARD_RUNNER] Creating persistence directory: ${persistentPath}`);
-            fs.mkdirSync(persistentPath, { recursive: true, mode: 0o777 });
+            fs.mkdirSync(persistentPath, { recursive: true });
         }
-        
-        // Ensure wide permissions for Docker access
         try {
              fs.chmodSync(persistentPath, 0o777);
         } catch (e) {
-             console.warn(`[SHARD_RUNNER] Warning: Could not chmod 777 persistent directory ${persistentPath}:`, e);
+             console.warn(`[SHARD_RUNNER] Could not chmod 777 persistent directory for ${slug}`, e);
         }
 
-        // 3. Create Container
+        // 4. Create Container
         console.log(`[SHARD_RUNNER] Creating container ${containerName}...`);
         const container = await docker.createContainer({
             Image: imageName,
@@ -127,11 +114,11 @@ export class ShardRunner {
             }
         });
 
-        // 4. Start Container
+        // 5. Start Container
         console.log(`[SHARD_RUNNER] Starting container ${containerName}...`);
         await container.start();
 
-        // 5. Inspect to get Internal IP
+        // 6. Inspect to get Internal IP
         const data = await container.inspect();
         const network = data.NetworkSettings.Networks['stardust_internal'];
         
@@ -142,43 +129,9 @@ export class ShardRunner {
         const internalIp = network.IPAddress;
         console.log(`[SHARD_RUNNER] Container ${containerName} is UP at IP: ${internalIp}. Waiting for health check on port ${finalPort}...`);
         
-        // 6. Polling TCP Health Check with Auto-Discovery (Timeout: 60s)
-        const scanPorts = Array.from(new Set([finalPort, 3000, 4000, 5000, 5173, 8080, 5678, 8000]));
-        let detectedPort = finalPort;
-
-        const isHealthy = await new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-                resolve(false);
-            }, 60000);
-
-            let sockets: net.Socket[] = [];
-
-            const interval = setInterval(() => {
-                for (const p of scanPorts) {
-                    const socket = new net.Socket();
-                    sockets.push(socket);
-                    
-                    socket.once('connect', () => {
-                        clearTimeout(timeout);
-                        clearInterval(interval);
-                        
-                        // Clean up all dangling sockets
-                        for (const s of sockets) s.destroy();
-                        
-                        detectedPort = p;
-                        resolve(true);
-                    });
-                    
-                    socket.once('error', () => {
-                        socket.destroy();
-                    });
-                    
-                    socket.connect(p, internalIp);
-                }
-            }, 1000);
-        });
-
-        if (!isHealthy) {
+        const result = await ShardRunner._waitForPort(slug, internalIp, finalPort);
+        
+        if (!result.healthy) {
             console.error(`[SHARD_RUNNER] Health check failed for ${containerName} after 60s. Fetching logs...`);
             try {
                 const logs = await container.logs({ stdout: true, stderr: true, tail: 50 });
@@ -186,18 +139,118 @@ export class ShardRunner {
             } catch (logErr) {
                 console.error(`[SHARD_RUNNER] Could not fetch logs for crash on ${containerName}`);
             }
-            try {
-                await container.stop();
-            } catch (e) {}
+            try { await container.stop(); } catch (e) {}
             throw new Error(`Health check timeout for ${containerName}`);
         }
 
-        if (detectedPort !== finalPort) {
-            console.log(`[SHARD_RUNNER] Auto-Discovery: Container ${containerName} is actually listening on ${detectedPort}! (Expected ${finalPort})`);
-        } else {
-            console.log(`[SHARD_RUNNER] Container ${containerName} passed health check and is READY on port ${detectedPort}.`);
-        }
+        console.log(`[SHARD_RUNNER] Container ${containerName} is READY on port ${result.port}.`);
+        return { ip: internalIp, port: result.port };
+    }
+
+    /**
+     * Boot a compose-based shard by finding the main service container
+     * (already started by ShardBuilder._buildCompose) and resolving its IP.
+     */
+    static async bootCompose(slug: string, mainService: string | null): Promise<{ ip: string; port: number }> {
+        console.log(`[SHARD_RUNNER] Resolving compose shard ${slug}, main service: ${mainService || 'auto-detect'}...`);
         
-        return { ip: internalIp, port: detectedPort };
+        const projectName = `stardust-${slug}`;
+
+        // List running containers for this compose project
+        const containers = await docker.listContainers({
+            all: false,
+            filters: { label: [`com.docker.compose.project=${projectName}`] }
+        });
+
+        if (containers.length === 0) {
+            throw new Error(`No running containers found for compose project ${projectName}`);
+        }
+
+        // Find the main service container
+        let targetContainer = containers[0]; // default: first container
+        if (mainService) {
+            const found = containers.find(c =>
+                c.Labels['com.docker.compose.service'] === mainService
+            );
+            if (found) {
+                targetContainer = found;
+            } else {
+                console.warn(`[SHARD_RUNNER] Main service '${mainService}' not found in ${projectName}. Using first container.`);
+            }
+        }
+
+        // Get IP from stardust_internal network
+        const networks = targetContainer.NetworkSettings?.Networks || {};
+        const stardustNet = networks['stardust_internal'];
+
+        if (!stardustNet?.IPAddress) {
+            throw new Error(`Container ${targetContainer.Names[0]} is not connected to stardust_internal network`);
+        }
+
+        const internalIp = stardustNet.IPAddress;
+        
+        // Try to detect the exposed port (from container ports or defaults)
+        const exposedPorts = targetContainer.Ports || [];
+        let guessPort = 80;
+        if (exposedPorts.length > 0) {
+            // Prefer the first private port
+            const firstPort = exposedPorts.find(p => p.PrivatePort);
+            if (firstPort) guessPort = firstPort.PrivatePort;
+        }
+
+        console.log(`[SHARD_RUNNER] Compose main container at IP: ${internalIp}. Health check on port ${guessPort}...`);
+        
+        const scanPorts = Array.from(new Set([guessPort, 3000, 80, 4000, 5000, 5173, 8080, 5678, 8000]));
+        const result = await ShardRunner._waitForPort(slug, internalIp, guessPort, scanPorts);
+
+        if (!result.healthy) {
+            throw new Error(`Health check timeout for compose shard ${slug}`);
+        }
+
+        console.log(`[SHARD_RUNNER] Compose shard ${slug} is READY. IP: ${internalIp}:${result.port}`);
+        return { ip: internalIp, port: result.port };
+    }
+
+    /**
+     * Shared TCP health check with port auto-discovery.
+     */
+    private static _waitForPort(
+        slug: string,
+        ip: string,
+        defaultPort: number,
+        scanPorts?: number[],
+        timeoutMs: number = 60000
+    ): Promise<{ healthy: boolean; port: number }> {
+        const ports = scanPorts ?? Array.from(new Set([defaultPort, 3000, 4000, 5000, 5173, 8080, 5678, 8000]));
+        let detectedPort = defaultPort;
+
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                resolve({ healthy: false, port: detectedPort });
+            }, timeoutMs);
+
+            let sockets: net.Socket[] = [];
+
+            const interval = setInterval(() => {
+                for (const p of ports) {
+                    const socket = new net.Socket();
+                    sockets.push(socket);
+
+                    socket.once('connect', () => {
+                        clearTimeout(timeout);
+                        clearInterval(interval);
+                        for (const s of sockets) s.destroy();
+                        detectedPort = p;
+                        resolve({ healthy: true, port: p });
+                    });
+
+                    socket.once('error', () => {
+                        socket.destroy();
+                    });
+
+                    socket.connect(p, ip);
+                }
+            }, 1000);
+        });
     }
 }
