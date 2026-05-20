@@ -99,6 +99,56 @@ if (!columnNames.includes('internal_ip')) {
     db.exec('ALTER TABLE apps ADD COLUMN internal_ip TEXT');
 }
 
+if (!columnNames.includes('compose_mode')) {
+    console.log('[DB_MIGRATION] Adding column compose_mode to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN compose_mode INTEGER DEFAULT 0');
+}
+
+if (!columnNames.includes('compose_main_service')) {
+    console.log('[DB_MIGRATION] Adding column compose_main_service to apps table');
+    db.exec('ALTER TABLE apps ADD COLUMN compose_main_service TEXT');
+}
+
+// Public routes table for webhook & external access
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shard_public_routes (
+    id TEXT PRIMARY KEY,
+    shard_slug TEXT NOT NULL,
+    path_pattern TEXT NOT NULL,
+    method TEXT DEFAULT '*',
+    rate_limit_rpm INTEGER DEFAULT 60,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(shard_slug) REFERENCES apps(slug) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_public_routes_slug ON shard_public_routes(shard_slug);
+`);
+
+// User Shard Access table (Operator permissions)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_shard_access (
+    user_id TEXT,
+    shard_slug TEXT,
+    granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, shard_slug),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(shard_slug) REFERENCES apps(slug) ON DELETE CASCADE
+  );
+`);
+
+// System Templates / Resources (Metadata for files in TEMPLATES_DIR)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS system_templates (
+    id TEXT PRIMARY KEY,
+    filename TEXT UNIQUE NOT NULL,
+    description TEXT,
+    is_text BOOLEAN DEFAULT 1,
+    size_bytes INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 // First-Boot Logic
 function runFirstBootCheck() {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM credentials');
@@ -116,6 +166,80 @@ function runFirstBootCheck() {
   }
 }
 
+// Seed Default System Templates
+import fs from 'fs';
+import { TEMPLATES_DIR } from './config/paths.js';
+
+function seedTemplates() {
+  const defaultTemplates = [
+    {
+      filename: 'workflow-frontend.yml',
+      description: 'Template Github Actions pour un projet Frontend uniquement (Vite, React, etc.)',
+      content: `name: Stardust Deploy — Frontend
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - name: Push to Stardust
+        run: |
+          cd dist && zip -qr ../deploy.zip . && cd ..
+          curl -f -sS -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+            -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
+            -F "app=@deploy.zip"`
+    },
+    {
+      filename: 'workflow-fullstack.yml',
+      description: 'Template Github Actions pour un projet Full-Stack (Node.js, Express, etc.)',
+      content: `name: Stardust Deploy — Full-Stack
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build --if-present
+      - name: Push to Stardust
+        run: |
+          zip -qr deploy.zip . -x ".git/*" ".github/*" "node_modules/*" "src/*" ".env*"
+          curl -f -sS -X POST "\${{ secrets.STARDUST_API_URL }}/api/shards/push" \\
+            -H "X-Stardust-Token: \${{ secrets.STARDUST_SHARD_TOKEN }}" \\
+            -F "app=@deploy.zip"`
+    }
+  ];
+
+  for (const t of defaultTemplates) {
+    const existing = db.prepare('SELECT id FROM system_templates WHERE filename = ?').get(t.filename);
+    if (!existing) {
+      const filePath = path.join(TEMPLATES_DIR, t.filename);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, t.content, 'utf-8');
+      }
+      const stats = fs.statSync(filePath);
+      const insertStmt = db.prepare(`
+        INSERT INTO system_templates (id, filename, description, is_text, size_bytes)
+        VALUES (?, ?, ?, 1, ?)
+      `);
+      insertStmt.run(crypto.randomUUID(), t.filename, t.description, stats.size);
+    }
+  }
+}
+
 runFirstBootCheck();
+seedTemplates();
 
 export default db;

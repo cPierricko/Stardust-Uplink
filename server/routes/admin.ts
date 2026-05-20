@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import crypto from 'crypto';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getLogs } from '../logger.js';
+import { getLogs, subscribeToLogs } from '../logger.js';
 import { DockerManager } from '../services/DockerManager.js';
 
 
@@ -98,6 +98,34 @@ router.delete('/tokens/:id', requireAuth, (req: Request, res: Response) => {
 router.get('/logs', requireAuth, (req: Request, res: Response) => {
     const lines = Math.min(parseInt((req.query['lines'] as string) || '200', 10), 500);
     res.json({ logs: getLogs(lines) });
+});
+
+// Master Backend Logs — SSE Stream
+router.get('/logs/stream', requireAuth, (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    // Send recent history first
+    const recent = getLogs(100);
+    for (const entry of recent) {
+        res.write(`data: ${JSON.stringify(entry)}\n\n`);
+    }
+
+    const unsubscribe = subscribeToLogs((entry) => {
+        res.write(`data: ${JSON.stringify(entry)}\n\n`);
+    });
+
+    const heartbeat = setInterval(() => {
+        res.write(': heartbeat\n\n');
+    }, 15000);
+
+    req.on('close', () => {
+        unsubscribe();
+        clearInterval(heartbeat);
+    });
 });
 
 // System & Docker Diagnostics

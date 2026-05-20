@@ -5,6 +5,7 @@ import { API_BASE } from '../../config/constants';
 import CPULoad from '../ui/CPULoad';
 import DecryptingText from '../ui/DecryptingText';
 import { User, DeployToken, ApiResponse } from '../../../../shared/types';
+import TemplatesManager from './TemplatesManager';
 
 interface UserRowProps {
     user: User;
@@ -114,6 +115,7 @@ export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
     const [newUsername, setNewUsername] = useState<string>('');
     const [lastGeneratedToken, setLastGeneratedToken] = useState<string | null>(null);
     const [copySuccess, setCopySuccess] = useState<boolean>(false);
+    const [activeTab, setActiveTab] = useState<'CREW' | 'LOGS' | 'RESOURCES'>('CREW');
 
     // System logs state
     const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -234,8 +236,31 @@ export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
                         <AlertTriangle size={20} />
                     </button>
                 </div>
-                <div className="flex-1 overflow-y-auto space-y-12 pr-2 scrollbar-hide">
-                    <section className="space-y-8">
+
+                <div className="flex gap-2 border-b border-cyan-dark/30 pb-2 mb-6">
+                    <button 
+                        onClick={() => setActiveTab('CREW')}
+                        className={`flex-1 py-1 text-[10px] font-bold tracking-widest uppercase transition-colors border ${activeTab === 'CREW' ? 'border-[#00d4ff] bg-[#00d4ff]/10 text-[#00d4ff]' : 'border-transparent text-gray-500 hover:text-cyan-400'}`}
+                    >
+                        CREW
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('LOGS')}
+                        className={`flex-1 py-1 text-[10px] font-bold tracking-widest uppercase transition-colors border ${activeTab === 'LOGS' ? 'border-[#00d4ff] bg-[#00d4ff]/10 text-[#00d4ff]' : 'border-transparent text-gray-500 hover:text-cyan-400'}`}
+                    >
+                        LOGS
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('RESOURCES')}
+                        className={`flex-1 py-1 text-[10px] font-bold tracking-widest uppercase transition-colors border ${activeTab === 'RESOURCES' ? 'border-[#00d4ff] bg-[#00d4ff]/10 text-[#00d4ff]' : 'border-transparent text-gray-500 hover:text-cyan-400'}`}
+                    >
+                        RESSOURCES
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide">
+                    {activeTab === 'CREW' && (
+                        <section className="space-y-8 fade-in">
                         <div className="flex items-center gap-3 mb-6">
                             <div className="h-[2px] w-8 bg-[#00d4ff]/50"></div>
                             <h3 className="text-xs font-bold text-white tracking-[0.2em] uppercase">OPERATOR_INVITATIONS (5min TTL)</h3>
@@ -279,9 +304,11 @@ export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
                             ))}
                         </div>
                     </section>
+                    )}
 
                     {/* ── SYSTEM LOGS ── */}
-                    <section className="space-y-4">
+                    {activeTab === 'LOGS' && (
+                    <section className="space-y-4 fade-in">
                         <div className="flex items-center gap-3 mb-4">
                             <div className="h-[2px] w-8 bg-empire-red/50"></div>
                             <h3 className="text-xs font-bold text-white tracking-[0.2em] uppercase flex items-center gap-2">
@@ -338,6 +365,13 @@ export default function AdminModal({ onClose, currentUser }: AdminModalProps) {
                             {logs.length > 0 ? `${logs.length} LINES BUFFERED · AUTO: ${autoRefresh ? '5s' : 'OFF'}` : 'BUFFER_EMPTY'}
                         </div>
                     </section>
+                    )}
+
+                    {activeTab === 'RESOURCES' && (
+                        <section className="fade-in">
+                            <TemplatesManager />
+                        </section>
+                    )}
                 </div>
 
                 <div className="mt-6 pt-4 border-t border-cyan-dark/20 flex flex-col gap-1 items-center">

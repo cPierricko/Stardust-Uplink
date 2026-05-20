@@ -9,14 +9,19 @@ import { exec } from 'child_process';
 import db from '../db.js';
 
 import { SHARDS_DIR as PATHS_SHARDS_DIR } from '../config/paths.js';
-import { ShardBuilder } from '../services/ShardBuilder.js';
+import { ShardBuilder, detectComposeFile, parseComposeServices } from '../services/ShardBuilder.js';
 import { ShardRunner } from '../services/ShardRunner.js';
+import { ShardLogCollector } from '../services/ShardLogCollector.js';
 import Docker from 'dockerode';
+import { requireAdmin, requireShardOwnership } from '../middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
+
+// Applique le check de propriété/accès à toutes les routes utilisant :id
+router.param('id', requireShardOwnership);
 
 
 // Helper to parse .env format to JSON string record
@@ -204,14 +209,19 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             has_backend = detectBackend(extractPath) ? 1 : 0;
         }
         
+        // Detect compose mode
+        const composeFile = (req.file || gitUrl) ? detectComposeFile(extractPath) : null;
+        const isCompose = !!composeFile;
+        const composeServices = isCompose ? parseComposeServices(extractPath, composeFile!) : [];
+
         const api_token = existing ? existing.api_token : crypto.randomUUID();
         const finalId = existing ? existing.id : crypto.randomUUID();
 
-        console.log(`[SHARDS] Final DB stats for ${appSlug}: id=${finalId}, has_backend=${has_backend}, port=${existing?.assigned_port}`);
+        console.log(`[SHARDS] Final DB stats for ${appSlug}: id=${finalId}, has_backend=${has_backend}, port=${existing?.assigned_port}, compose=${isCompose}`);
 
         const stmt = db.prepare(`
-            INSERT INTO apps (id, name, slug, deploy_method, api_token, env_vars, path, has_backend, assigned_port, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO apps (id, name, slug, deploy_method, api_token, env_vars, path, has_backend, assigned_port, status, compose_mode, compose_main_service)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(slug) DO UPDATE SET
                 name = excluded.name,
                 deploy_method = excluded.deploy_method,
@@ -219,7 +229,8 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
                 env_vars = excluded.env_vars,
                 api_token = excluded.api_token,
                 has_backend = excluded.has_backend,
-                status = excluded.status
+                status = excluded.status,
+                compose_mode = excluded.compose_mode
         `);
 
         stmt.run(
@@ -228,11 +239,13 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             appSlug,
             deploy_method || 'manual',
             api_token,
-            finalEnvVars, // Use the merged env_vars
+            finalEnvVars,
             extractPath,
-            has_backend,
+            isCompose ? 1 : has_backend,
             existing ? existing.assigned_port : (3000 + Math.floor(Math.random() * 1000)),
-            'BUILDING'
+            'BUILDING',
+            isCompose ? 1 : 0,
+            isCompose ? (existing?.compose_main_service || (composeServices[0] ?? null)) : null
         );
 
         res.json({
@@ -243,7 +256,9 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
                 slug: appSlug,
                 url: `/shards/${appSlug}`,
                 api_token,
-                status: 'BUILDING'
+                status: 'BUILDING',
+                compose_mode: isCompose,
+                compose_services: composeServices
             }
         });
 
@@ -252,20 +267,36 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             (async () => {
                 try {
                     await ShardBuilder.build(extractPath, appSlug);
-                    const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
-                    let internalPort = isNode ? 3000 : 80;
-                    if (isNode) {
-                        try {
-                            const pkg = JSON.parse(fs.readFileSync(path.join(extractPath, 'package.json'), 'utf8'));
-                            if (pkg.name === 'n8n' || (pkg.dependencies && pkg.dependencies['n8n'])) internalPort = 5678;
-                        } catch(e) {}
+
+                    // Re-read compose_mode and compose_main_service from DB (may have been set by user)
+                    const shardRow = db.prepare('SELECT compose_mode, compose_main_service, env_vars FROM apps WHERE slug = ?').get(appSlug) as any;
+                    const useCompose = shardRow?.compose_mode === 1 || isCompose;
+
+                    let bootResult: { ip: string; port: number };
+                    if (useCompose) {
+                        bootResult = await ShardRunner.bootCompose(appSlug, shardRow?.compose_main_service || null);
+                    } else {
+                        const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
+                        let internalPort = isNode ? 3000 : 80;
+                        if (isNode) {
+                            try {
+                                const pkg = JSON.parse(fs.readFileSync(path.join(extractPath, 'package.json'), 'utf8'));
+                                if (pkg.name === 'n8n' || (pkg.dependencies && pkg.dependencies['n8n'])) internalPort = 5678;
+                            } catch(e) {}
+                        }
+                        bootResult = await ShardRunner.boot(appSlug, finalEnvVars, internalPort);
                     }
-                    
-                    const bootResult = await ShardRunner.boot(appSlug, finalEnvVars, internalPort);
-                    
+
                     db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
                       .run('DEPLOYED', bootResult.ip, bootResult.port, appSlug);
-                    
+
+                    // Start real-time log collection
+                    if (useCompose) {
+                        ShardLogCollector.startCompose(appSlug);
+                    } else {
+                        ShardLogCollector.start(appSlug);
+                    }
+
                     console.log(`[SHARDS] Auto-deploy succeeded for ${appSlug}. IP: ${bootResult.ip}:${bootResult.port}`);
                 } catch (err) {
                     console.error(`[SHARDS] Auto-deploy failed for ${appSlug}:`, err);
@@ -478,24 +509,32 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
         const has_backend = detectBackend(extractPath) ? 1 : 0;
         db.prepare('UPDATE apps SET has_backend = ?, status = ? WHERE slug = ?').run(has_backend, 'BUILDING', shard.slug);
 
-        // ASYNC DOCKER BUILD & RUN
+        // ASYNC DOCKER BUILD & RUN (CI/CD push)
         (async () => {
             try {
                 await ShardBuilder.build(extractPath, shard.slug);
-                const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
-                let internalPort = isNode ? 3000 : 80;
-                if (isNode) {
-                    try {
-                        const pkg = JSON.parse(fs.readFileSync(path.join(extractPath, 'package.json'), 'utf8'));
-                        if (pkg.name === 'n8n' || (pkg.dependencies && pkg.dependencies['n8n'])) internalPort = 5678;
-                    } catch(e) {}
+
+                const shardRow = db.prepare('SELECT compose_mode, compose_main_service, env_vars FROM apps WHERE slug = ?').get(shard.slug) as any;
+                const useCompose = shardRow?.compose_mode === 1;
+
+                let bootResult: { ip: string; port: number };
+                if (useCompose) {
+                    bootResult = await ShardRunner.bootCompose(shard.slug, shardRow?.compose_main_service || null);
+                } else {
+                    const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
+                    let internalPort = isNode ? 3000 : 80;
+                    if (isNode) {
+                        try {
+                            const pkg = JSON.parse(fs.readFileSync(path.join(extractPath, 'package.json'), 'utf8'));
+                            if (pkg.name === 'n8n' || (pkg.dependencies && pkg.dependencies['n8n'])) internalPort = 5678;
+                        } catch(e) {}
+                    }
+                    bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, internalPort);
                 }
-                
-                const bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, internalPort);
-                
+
                 db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
                   .run('DEPLOYED', bootResult.ip, bootResult.port, shard.slug);
-                
+
                 console.log(`[CI/CD] Auto-deploy succeeded for ${shard.slug}. IP: ${bootResult.ip}:${bootResult.port}`);
             } catch (err) {
                 console.error(`[CI/CD] Auto-deploy failed for ${shard.slug}:`, err);
@@ -538,8 +577,24 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
  */
 router.get('/', (req: Request, res: Response) => {
     try {
-        const stmt = db.prepare('SELECT * FROM apps ORDER BY name ASC');
-        const shards = stmt.all() as any[];
+        const user = (req as any).user;
+        let shards = [];
+
+        if (user && user.role === 'administrator') {
+            const stmt = db.prepare('SELECT * FROM apps ORDER BY name ASC');
+            shards = stmt.all() as any[];
+        } else if (user) {
+            // Operator: only shards they have access to
+            const stmt = db.prepare(`
+                SELECT a.* FROM apps a
+                JOIN user_shard_access usa ON usa.shard_slug = a.slug
+                WHERE usa.user_id = ?
+                ORDER BY a.name ASC
+            `);
+            shards = stmt.all(user.id) as any[];
+        } else {
+            return res.status(401).json({ error: 'Authentication required' });
+        }
 
         // Enhance shards with actual .env file content if present
         const enhancedShards = shards.map(shard => {
@@ -569,18 +624,20 @@ router.get('/', (req: Request, res: Response) => {
 router.post('/:id/restart', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const shard = db.prepare('SELECT slug, env_vars, assigned_port FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug, env_vars, assigned_port, compose_mode, compose_main_service FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        // Send early response
         res.json({ success: true, message: 'RESTART_INITIATED' });
-        
-        // Update db and reboot in background
         db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('BUILDING', id);
-        
+
         (async () => {
             try {
-                const bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
+                let bootResult: { ip: string; port: number };
+                if (shard.compose_mode === 1) {
+                    bootResult = await ShardRunner.bootCompose(shard.slug, shard.compose_main_service || null);
+                } else {
+                    bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
+                }
                 db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
                   .run('DEPLOYED', bootResult.ip, bootResult.port, shard.slug);
             } catch (err) {
@@ -620,20 +677,78 @@ router.get('/:id/status', (req: Request, res: Response) => {
 router.post('/:id/start', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
-        const shard = db.prepare('SELECT slug, env_vars, assigned_port FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug, env_vars, assigned_port, compose_mode, compose_main_service FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
         res.json({ success: true, message: 'START_INITIATED' });
         db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('BUILDING', id);
         (async () => {
             try {
-                const bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
+                let bootResult: { ip: string; port: number };
+                if (shard.compose_mode === 1) {
+                    bootResult = await ShardRunner.bootCompose(shard.slug, shard.compose_main_service || null);
+                } else {
+                    bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
+                }
                 db.prepare('UPDATE apps SET status = ?, internal_ip = ?, assigned_port = ? WHERE slug = ?')
                   .run('DEPLOYED', bootResult.ip, bootResult.port, shard.slug);
             } catch (err) {
                 db.prepare('UPDATE apps SET status = ? WHERE slug = ?').run('FAILED', shard.slug);
             }
         })();
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * PATCH /api/shards/:id/compose-service
+ * Sets the main service name for a compose shard.
+ */
+router.patch('/:id/compose-service', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { service } = req.body;
+    if (!service) return res.status(400).json({ error: 'service name required' });
+    try {
+        const shard = db.prepare('SELECT slug, path, compose_mode FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+        if (!shard.compose_mode) return res.status(400).json({ error: 'Shard is not in compose mode' });
+
+        db.prepare('UPDATE apps SET compose_main_service = ? WHERE id = ?').run(service, id);
+
+        // Also return available services for convenience
+        const composeFile = detectComposeFile(shard.path);
+        const services = composeFile ? parseComposeServices(shard.path, composeFile) : [];
+
+        res.json({ success: true, compose_main_service: service, available_services: services });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * GET /api/shards/:id/compose-services
+ * Returns available services from the compose file.
+ */
+router.get('/:id/compose-services', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug, path, compose_mode, compose_main_service FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        if (!shard.compose_mode) {
+            return res.json({ success: true, compose_mode: false, services: [], compose_main_service: null });
+        }
+
+        const composeFile = detectComposeFile(shard.path);
+        const services = composeFile ? parseComposeServices(shard.path, composeFile) : [];
+
+        res.json({
+            success: true,
+            compose_mode: true,
+            services,
+            compose_main_service: shard.compose_main_service
+        });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
@@ -677,31 +792,86 @@ router.delete('/:id/logs', (req: Request, res: Response) => {
 
 /**
  * GET /api/shards/:id/logs
+ * Returns buffered or build logs for a shard.
  */
 router.get('/:id/logs', async (req: Request, res: Response) => {
     const { id } = req.params;
+    const tail = parseInt((req.query['tail'] as string) || '200', 10);
     try {
-        const shard = db.prepare('SELECT slug, status FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug, status, compose_mode FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
         
-        // If still building, serve the internal build logs file
+        // If building, serve the internal build logs file
         if (shard.status === 'BUILDING') {
             const logPath = path.join(PATHS_SHARDS_DIR, shard.slug, 'logs.txt');
             if (fs.existsSync(logPath)) {
-                return res.json({ success: true, logs: fs.readFileSync(logPath, 'utf8') });
+                return res.json({ success: true, logs: fs.readFileSync(logPath, 'utf8'), source: 'build' });
             }
-            return res.json({ success: true, logs: 'UPLINK_ESTABLISHING... WAITING_FOR_BUILD_LOGS' });
+            return res.json({ success: true, logs: 'UPLINK_ESTABLISHING... WAITING_FOR_BUILD_LOGS', source: 'build' });
         }
 
-        // Once deployed or failed, serve the actual Docker container runtime logs
-        const containerName = `stardust-shard-${shard.slug}`;
-        try {
-             const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
-             const logs = await container.logs({ stdout: true, stderr: true, tail: 100 });
-             res.json({ success: true, logs: logs.toString('utf8') });
-        } catch (e) {
-             res.json({ success: true, logs: 'NO_DOCKER_LOGS_YET' });
+        // If collector has buffered logs, serve them
+        if (ShardLogCollector.isCollecting(shard.slug)) {
+            return res.json({ success: true, logs: ShardLogCollector.getLogs(shard.slug, tail), source: 'live' });
         }
+
+        // Fallback: try to read from log file, then docker directly
+        const logFilePath = path.join(process.cwd(), 'logs', `shard-${shard.slug}.log`);
+        if (fs.existsSync(logFilePath)) {
+            const lines = fs.readFileSync(logFilePath, 'utf8').split('\n').filter(Boolean);
+            return res.json({ success: true, logs: lines.slice(-tail).join('\n'), source: 'file' });
+        }
+
+        // Last resort: docker logs
+        try {
+            const containerName = `stardust-shard-${shard.slug}`;
+            const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
+            const logs = await container.logs({ stdout: true, stderr: true, tail });
+            return res.json({ success: true, logs: logs.toString('utf8'), source: 'docker' });
+        } catch {
+            return res.json({ success: true, logs: 'NO_LOGS_AVAILABLE', source: 'none' });
+        }
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * GET /api/shards/:id/logs/stream
+ * Server-Sent Events endpoint for real-time shard logs.
+ */
+router.get('/:id/logs/stream', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+
+        // Send existing buffered logs first
+        const existing = ShardLogCollector.getLogLines(shard.slug, 100);
+        for (const line of existing) {
+            res.write(`data: ${JSON.stringify(line)}\n\n`);
+        }
+
+        // Subscribe to new lines
+        const unsubscribe = ShardLogCollector.subscribeToShardLogs(shard.slug, (line) => {
+            res.write(`data: ${JSON.stringify(line)}\n\n`);
+        });
+
+        // Heartbeat every 15s to keep connection alive
+        const heartbeat = setInterval(() => {
+            res.write(': heartbeat\n\n');
+        }, 15000);
+
+        req.on('close', () => {
+            unsubscribe();
+            clearInterval(heartbeat);
+        });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
@@ -734,6 +904,203 @@ router.post('/:id/command', async (req: Request, res: Response) => {
         } catch (e: any) {
              res.status(500).json({ error: e.message });
         }
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  PUBLIC ROUTES (Webhook / External access)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/shards/:id/public-routes
+ * List all public routes for a shard.
+ */
+router.get('/:id/public-routes', requireAdmin, (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const routes = db.prepare(
+            'SELECT * FROM shard_public_routes WHERE shard_slug = ? ORDER BY created_at ASC'
+        ).all(shard.slug) as any[];
+
+        res.json({ success: true, data: routes });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/shards/:id/public-routes
+ * Create a new public route for a shard.
+ */
+router.post('/:id/public-routes', requireAdmin, (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { path_pattern, method = '*', rate_limit_rpm = 60, description = '' } = req.body;
+
+    if (!path_pattern) {
+        return res.status(400).json({ error: 'path_pattern is required' });
+    }
+
+    // Validate pattern format
+    if (!path_pattern.startsWith('/')) {
+        return res.status(400).json({ error: 'path_pattern must start with /' });
+    }
+
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const routeId = crypto.randomUUID();
+
+        // Security warning for broad patterns
+        const isBroadPattern = path_pattern === '/*' || path_pattern === '*' || path_pattern === '/';
+        if (isBroadPattern) {
+            console.warn(`[PUBLIC_ROUTE] WARNING: Broad public route "${path_pattern}" created for shard "${shard.slug}". This exposes all routes without auth!`);
+        }
+
+        db.prepare(`
+            INSERT INTO shard_public_routes (id, shard_slug, path_pattern, method, rate_limit_rpm, description)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(routeId, shard.slug, path_pattern, method.toUpperCase(), Math.min(rate_limit_rpm, 1000), description);
+
+        const created = db.prepare('SELECT * FROM shard_public_routes WHERE id = ?').get(routeId) as any;
+        res.json({ success: true, data: created, warning: isBroadPattern ? 'BROAD_PATTERN_SECURITY_RISK' : null });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * PATCH /api/shards/:id/public-routes/:routeId
+ * Update an existing public route (rate limit or description).
+ */
+router.patch('/:id/public-routes/:routeId', requireAdmin, (req: Request, res: Response) => {
+    const { id, routeId } = req.params;
+    const { rate_limit_rpm, description, method, path_pattern } = req.body;
+
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const route = db.prepare('SELECT * FROM shard_public_routes WHERE id = ? AND shard_slug = ?').get(routeId, shard.slug) as any;
+        if (!route) return res.status(404).json({ error: 'Route not found' });
+
+        const updates: any = {
+            rate_limit_rpm: rate_limit_rpm !== undefined ? Math.min(rate_limit_rpm, 1000) : route.rate_limit_rpm,
+            description: description !== undefined ? description : route.description,
+            method: method !== undefined ? method.toUpperCase() : route.method,
+            path_pattern: path_pattern !== undefined ? path_pattern : route.path_pattern
+        };
+
+        db.prepare(`
+            UPDATE shard_public_routes 
+            SET rate_limit_rpm = ?, description = ?, method = ?, path_pattern = ?
+            WHERE id = ?
+        `).run(updates.rate_limit_rpm, updates.description, updates.method, updates.path_pattern, routeId);
+
+        const updated = db.prepare('SELECT * FROM shard_public_routes WHERE id = ?').get(routeId) as any;
+        res.json({ success: true, data: updated });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /api/shards/:id/public-routes/:routeId
+ * Delete a public route.
+ */
+router.delete('/:id/public-routes/:routeId', requireAdmin, (req: Request, res: Response) => {
+    const { id, routeId } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const result = db.prepare(
+            'DELETE FROM shard_public_routes WHERE id = ? AND shard_slug = ?'
+        ).run(routeId, shard.slug);
+
+        if (result.changes === 0) {
+            return res.status(404).json({ error: 'Route not found' });
+        }
+
+        res.json({ success: true, message: 'PUBLIC_ROUTE_DELETED' });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  USER ACCESS MANAGEMENT (Admin Only)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/shards/:id/access
+ * List operators who have access to this shard.
+ */
+router.get('/:id/access', requireAdmin, (req: Request, res: Response) => {
+    const { id } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        // Get all operators and whether they have access
+        const users = db.prepare(`
+            SELECT u.id, u.username, 
+                   CASE WHEN usa.user_id IS NOT NULL THEN 1 ELSE 0 END as has_access
+            FROM users u
+            LEFT JOIN user_shard_access usa ON u.id = usa.user_id AND usa.shard_slug = ?
+            WHERE u.role = 'operator'
+            ORDER BY u.username ASC
+        `).all(shard.slug) as any[];
+
+        res.json({ success: true, data: users });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/shards/:id/access
+ * Grant access to an operator for this shard.
+ */
+router.post('/:id/access', requireAdmin, (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { user_id } = req.body;
+
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        db.prepare(`
+            INSERT OR IGNORE INTO user_shard_access (user_id, shard_slug)
+            VALUES (?, ?)
+        `).run(user_id, shard.slug);
+
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /api/shards/:id/access/:userId
+ * Revoke access from an operator for this shard.
+ */
+router.delete('/:id/access/:userId', requireAdmin, (req: Request, res: Response) => {
+    const { id, userId } = req.params;
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        db.prepare('DELETE FROM user_shard_access WHERE user_id = ? AND shard_slug = ?').run(userId, shard.slug);
+
+        res.json({ success: true });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }

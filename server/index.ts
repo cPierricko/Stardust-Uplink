@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import deployRoutes from './routes/deploy.js';
+import templatesRoutes from './routes/templates.js';
 import shardsRoutes, { SHARDS_DIR } from './routes/shards.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
@@ -59,16 +60,106 @@ app.use((req, res, next) => {
     next();
 });
 
-// Helper to redirect to login or send 401
+// ── Rate limiter for public shard routes ──────────────────────────────────────
+// Sliding window (per route id, per IP), stored in memory
+interface RateLimitEntry {
+    timestamps: number[];
+}
+const rateLimitStore: Map<string, RateLimitEntry> = new Map();
+
+function checkRateLimit(routeId: string, ip: string, rpm: number): boolean {
+    const key = `${routeId}:${ip}`;
+    const now = Date.now();
+    const windowMs = 60_000; // 1 minute
+    
+    let entry = rateLimitStore.get(key);
+    if (!entry) {
+        entry = { timestamps: [] };
+        rateLimitStore.set(key, entry);
+    }
+    
+    // Remove timestamps outside the window
+    entry.timestamps = entry.timestamps.filter(ts => now - ts < windowMs);
+    
+    if (entry.timestamps.length >= rpm) {
+        return false; // Rate limit exceeded
+    }
+    
+    entry.timestamps.push(now);
+    return true;
+}
+
+// Clean up rate limit store every 5 minutes to prevent memory leak
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateLimitStore.entries()) {
+        entry.timestamps = entry.timestamps.filter(ts => now - ts < 60_000);
+        if (entry.timestamps.length === 0) rateLimitStore.delete(key);
+    }
+}, 5 * 60_000);
+
+// ── Pattern matching for public routes ────────────────────────────────────────
+function matchPublicRoute(pattern: string, urlPath: string): boolean {
+    // Normalize: strip query string from urlPath
+    const cleanUrl = urlPath.split('?')[0];
+    
+    if (pattern.endsWith('/*')) {
+        // Wildcard: /webhook/* matches /webhook/anything
+        const base = pattern.slice(0, -2);
+        return cleanUrl === base || cleanUrl.startsWith(base + '/');
+    }
+    if (pattern.endsWith('*')) {
+        return cleanUrl.startsWith(pattern.slice(0, -1));
+    }
+    return cleanUrl === pattern;
+}
+
+// ── Helper to redirect to login or send 401 ───────────────────────────────────
 const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
     // The 'stardust' shard is the management interface and handles its own auth/setup
     if (req.params['slug'] === 'stardust') return next();
 
+    const slug = req.params['slug'];
+    const urlPath = req.url.replace(new RegExp(`^/shards/${slug}`), '') || '/';
+
+    // ── Check public routes BEFORE auth ────────────────────────────────────
+    try {
+        const publicRoutes = db.prepare(
+            'SELECT id, path_pattern, method, rate_limit_rpm FROM shard_public_routes WHERE shard_slug = ?'
+        ).all(slug) as any[];
+
+        for (const route of publicRoutes) {
+            const methodMatch = route.method === '*' || route.method.toUpperCase() === req.method.toUpperCase();
+            const pathMatch = matchPublicRoute(route.path_pattern, urlPath);
+            
+            if (methodMatch && pathMatch) {
+                // Rate limiting
+                const clientIp = (req.ip || req.socket.remoteAddress || 'unknown').replace('::ffff:', '');
+                const rpm = route.rate_limit_rpm || 60;
+                
+                if (!checkRateLimit(route.id, clientIp, rpm)) {
+                    return res.status(429).json({
+                        error: 'Rate limit exceeded',
+                        message: `Max ${rpm} requests per minute on this public route`,
+                        retry_after: 60
+                    });
+                }
+                
+                // Pattern matches — bypass auth entirely
+                console.log(`[PUBLIC_ROUTE] ${req.method} ${slug}${urlPath} → matched pattern "${route.path_pattern}" (bypassing auth)`);
+                return next();
+            }
+        }
+    } catch (dbErr) {
+        console.error('[PUBLIC_ROUTE] DB error checking public routes:', dbErr);
+        // Continue to auth check on DB error — fail secure
+    }
+
+    // ── Standard JWT auth ───────────────────────────────────────────────────
     const token = req.cookies?.jwt;
     if (!token) {
         if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Auth required' });
         
-        // Calculate the central login URL dynamically
         const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
         const host = req.get('host') || '';
         const parts = host.split('.');
@@ -77,7 +168,6 @@ const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
         if (host.includes('localhost')) {
             loginUrl = 'http://localhost:3000/login';
         } else {
-            // Redirect to root domain (e.g. rogue-one.cloud)
             const baseDomain = parts.length >= 2 ? parts.slice(-2).join('.') : 'rogue-one.cloud';
             loginUrl = `https://${baseDomain}/login`;
         }
@@ -86,7 +176,47 @@ const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
     }
 
     try {
-        jwt.verify(token, jwtSecret);
+        const decoded = jwt.verify(token, jwtSecret) as any;
+        
+        // ── Check Operator Shard Access ───────────────────────────────────────
+        if (decoded && decoded.role === 'operator') {
+            const hasAccess = db.prepare('SELECT 1 FROM user_shard_access WHERE user_id = ? AND shard_slug = ?').get(decoded.id, slug);
+            if (!hasAccess) {
+                console.warn(`[AUTH] FORBIDDEN: Operator ${decoded.username} attempted to access shard ${slug} via proxy`);
+                
+                // Return 403 for API or HTML for browser
+                if (req.url.startsWith('/api')) {
+                    return res.status(403).json({ error: 'Access denied to this shard' });
+                }
+                
+                const host = req.get('host') || '';
+                const parts = host.split('.');
+                const baseDomain = parts.length >= 2 ? parts.slice(-2).join('.') : 'rogue-one.cloud';
+                const dashboardUrl = host.includes('localhost') ? 'http://localhost:3000' : `https://${baseDomain}`;
+                
+                return res.status(403).send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>403 Forbidden</title>
+                        <style>
+                            body { background: #0a0f18; color: #ef4444; font-family: monospace; padding: 3rem; text-align: center; }
+                            h1 { font-size: 2rem; margin-bottom: 1rem; border-bottom: 1px solid #7f1d1d; padding-bottom: 1rem; display: inline-block; }
+                            p { color: #9ca3af; margin-bottom: 2rem; }
+                            a { display: inline-block; padding: 0.5rem 1rem; border: 1px solid #14b8a6; color: #14b8a6; text-decoration: none; transition: all 0.2s; }
+                            a:hover { background: #14b8a6; color: #000; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>403_ACCESS_DENIED</h1>
+                        <p>Vous n'avez pas l'autorisation d'accéder au shard <strong>${slug}</strong>.</p>
+                        <a href="${dashboardUrl}">RETURN_TO_DASHBOARD</a>
+                    </body>
+                    </html>
+                `);
+            }
+        }
+
         next();
     } catch (err) {
         if (req.url.startsWith('/api')) return res.status(401).json({ error: 'Invalid token' });
@@ -101,7 +231,7 @@ const requireShardAuth = (req: Request, res: Response, next: NextFunction) => {
 };
 
 // === SHARD API PROXY ===
-// Redirects /shards/:slug/api/* to the shard's own backend
+// Redirects /shards/:slug/* to the shard's own backend
 // IMPORTANT: This proxy MUST run BEFORE express.json() parses the body, otherwise the stream is silently consumed!
 app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, next: NextFunction) => {
     // If it's a test environment fallback, only intercept API requests
@@ -142,6 +272,7 @@ app.use('/shards/:slug', requireShardAuth, async (req: Request, res: Response, n
     return res.status(503).json({ error: 'Shard backend not deployed, offline, or not found' });
 });
 
+
 // Parsers for Stardust's own API
 app.use(express.json());
 
@@ -152,6 +283,9 @@ app.use('/api/auth', authRoutes);
 
 // Protected Admin & System Routes
 app.use('/api/admin', adminRoutes);
+
+// Templates & Resources Routes
+app.use('/api/templates', templatesRoutes);
 
 // Deployment Routes (Internal protection via Deploy Token)
 app.use('/api/deploy', (deployRoutes as any).router);

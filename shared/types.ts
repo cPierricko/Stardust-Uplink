@@ -29,6 +29,8 @@ export interface Shard {
     assigned_port?: number;
     status?: string;
     internal_ip?: string;
+    compose_mode?: boolean;
+    compose_main_service?: string;
 }
 
 export interface ShardUploadResponse {
