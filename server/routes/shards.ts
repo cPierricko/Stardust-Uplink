@@ -505,9 +505,13 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
         fs.writeFileSync(envPath, formatToEnv(shard.env_vars));
         console.log(`[CI/CD] RESTORED_.ENV: ${shard.slug} at ${envPath}`);
 
+        // Detect compose mode
+        const composeFile = detectComposeFile(extractPath);
+        const isCompose = !!composeFile;
+
         // Re-detect backend in case it changed
         const has_backend = detectBackend(extractPath) ? 1 : 0;
-        db.prepare('UPDATE apps SET has_backend = ?, status = ? WHERE slug = ?').run(has_backend, 'BUILDING', shard.slug);
+        db.prepare('UPDATE apps SET has_backend = ?, status = ?, compose_mode = ? WHERE slug = ?').run(has_backend, 'BUILDING', isCompose ? 1 : 0, shard.slug);
 
         // ASYNC DOCKER BUILD & RUN (CI/CD push)
         (async () => {
@@ -515,7 +519,7 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
                 await ShardBuilder.build(extractPath, shard.slug);
 
                 const shardRow = db.prepare('SELECT compose_mode, compose_main_service, env_vars FROM apps WHERE slug = ?').get(shard.slug) as any;
-                const useCompose = shardRow?.compose_mode === 1;
+                const useCompose = shardRow?.compose_mode === 1 || isCompose;
 
                 let bootResult: { ip: string; port: number };
                 if (useCompose) {
