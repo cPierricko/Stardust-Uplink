@@ -2,6 +2,8 @@ import Docker from 'dockerode';
 import net from 'net';
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
+import { SHARDS_DIR } from '../config/paths.js';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -148,16 +150,71 @@ export class ShardRunner {
     }
 
     /**
-     * Boot a compose-based shard by finding the main service container
-     * (already started by ShardBuilder._buildCompose) and resolving its IP.
+     * Boot a compose-based shard by running docker compose up -d,
+     * connecting services to the network, and resolving its IP.
      */
     static async bootCompose(slug: string, mainService: string | null): Promise<{ ip: string; port: number }> {
-        console.log(`[SHARD_RUNNER] Resolving compose shard ${slug}, main service: ${mainService || 'auto-detect'}...`);
+        console.log(`[SHARD_RUNNER] Booting compose shard ${slug}, main service: ${mainService || 'auto-detect'}...`);
         
         const projectName = `stardust-${slug}`;
+        const shardPath = path.join(SHARDS_DIR, slug);
 
-        // List running containers for this compose project
-        const containers = await docker.listContainers({
+        // 1. Execute docker compose up -d
+        await new Promise<void>((resolve, reject) => {
+            const composeFile = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].find(f => fs.existsSync(path.join(shardPath, f)));
+            
+            if (!composeFile) {
+                console.warn(`[SHARD_RUNNER] No compose file found in ${shardPath}, skipping docker compose up.`);
+                return resolve();
+            }
+
+            const composeProcess = spawn('docker', [
+                'compose',
+                '-p', projectName,
+                '-f', composeFile,
+                'up', '-d', '--remove-orphans'
+            ], {
+                cwd: shardPath,
+                env: { ...process.env }
+            });
+
+            composeProcess.on('close', (code) => {
+                if (code !== 0) {
+                    console.warn(`[SHARD_RUNNER] docker compose up failed with code ${code}`);
+                    return reject(new Error(`docker compose up failed with code ${code}`));
+                }
+                resolve();
+            });
+            
+            composeProcess.on('error', (err) => {
+                reject(err);
+            });
+        });
+
+        // 2. Connect containers to stardust_internal network
+        let containers = await docker.listContainers({
+            all: false,
+            filters: { label: [`com.docker.compose.project=${projectName}`] }
+        });
+
+        try {
+            const network = docker.getNetwork('stardust_internal');
+            for (const c of containers) {
+                try {
+                    await network.connect({ Container: c.Id });
+                    console.log(`[SHARD_RUNNER] Connected ${c.Names[0]} to stardust_internal`);
+                } catch (connectErr: any) {
+                    if (!connectErr.message?.includes('already exists')) {
+                        console.warn(`[SHARD_RUNNER] Could not connect ${c.Names[0]}:`, connectErr.message);
+                    }
+                }
+            }
+        } catch (networkErr: any) {
+            console.warn(`[SHARD_RUNNER] Network connection step failed for ${slug}:`, networkErr.message);
+        }
+
+        // Re-list running containers just in case
+        containers = await docker.listContainers({
             all: false,
             filters: { label: [`com.docker.compose.project=${projectName}`] }
         });
