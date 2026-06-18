@@ -24,13 +24,18 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
 
     const fetchLogs = async () => {
         try {
-            const res = await fetch(`${API_BASE}/shards/${shard.id}/logs`, { credentials: 'include' });
-            const data = await res.json();
-            if (data.success) {
+            const res = await fetch(`${API_BASE}/shards/${shard.slug}/logs?t=${Date.now()}`, { credentials: 'include' });
+            const text = await res.text();
+            console.log("DEBUG_LOGS_RECEIVED:", text); // Vérifie ça dans la console F12
+            try {
+                const data = JSON.parse(text);
                 setLogsContent(data.logs || 'NO_LOGS_YET');
+            } catch {
+                // S'il n'y a pas de JSON (texte brut envoyé par le backend)
+                setLogsContent(text || 'NO_LOGS_YET');
             }
         } catch (err) {
-            console.error('Failed to fetch logs:', err);
+            console.error("Erreur lors de la récupération des logs:", err);
         }
     };
 
@@ -175,10 +180,16 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
                                     [CLOSE_TERMINAL]
                                 </button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed text-gray-300 bg-black/60 custom-scrollbar">
-                                <pre className="whitespace-pre-wrap font-mono">
-                                    {logsContent}
-                                </pre>
+                            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed text-gray-300 bg-black/60 custom-scrollbar log-container">
+                                {logsContent === "NO_LOGS_AVAILABLE" || logsContent === "NO_LOGS_YET" || logsContent === "COLLECTING_LOGS_PLEASE_WAIT" || logsContent.includes("LOG_FILE_NOT_FOUND") ? (
+                                    <div className="text-gray-500 italic p-4">
+                                        Aucun log disponible pour le moment... en attente de données du container.
+                                    </div>
+                                ) : (
+                                    <pre className="whitespace-pre-wrap font-mono">
+                                        {logsContent}
+                                    </pre>
+                                )}
                                 <div ref={logsEndRef} />
                             </div>
                         </motion.div>
