@@ -99,6 +99,15 @@ class ShardLogCollectorService {
      * Replaces any existing collector for this slug.
      */
     start(slug: string): void {
+        const shardPath = path.join(SHARDS_DIR, slug);
+        const hasCompose = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+            .some(file => fs.existsSync(path.join(shardPath, file)));
+
+        if (hasCompose) {
+            console.log(`[LOG_COLLECTOR] Auto-routing ${slug} to startCompose()`);
+            return this.startCompose(slug);
+        }
+
         // Stop existing collector if any
         this.stop(slug);
 
