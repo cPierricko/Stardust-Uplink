@@ -846,6 +846,16 @@ router.delete('/:id/database', async (req: Request, res: Response) => {
                 console.error('[SHARDS] docker compose down -v exited with code:', result.status, result.stderr?.toString());
                 return res.status(500).json({ success: false, error: 'Docker compose down failed', details: result.stderr?.toString() });
             }
+            // WIPE Bind Mounts (local folders often used in compose projects)
+            ['data', 'persistent_data'].forEach(folder => {
+                const fp = path.join(shardPath, folder);
+                if (fs.existsSync(fp)) {
+                    try {
+                        fs.rmSync(fp, { recursive: true, force: true });
+                        fs.mkdirSync(fp, { recursive: true });
+                    } catch (e) {}
+                }
+            });
             db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('STOPPED', id);
         } else {
             const persistentPath = path.join(process.cwd(), 'persistent_data', app.slug);
