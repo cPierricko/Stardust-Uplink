@@ -22,42 +22,42 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
 
     const status = shard.status || 'READY'; 
 
-    const fetchLogs = async () => {
-        try {
-            const res = await fetch(`${API_BASE}/shards/${shard.slug}/logs?t=${Date.now()}`, { credentials: 'include' });
-            const text = await res.text();
-            console.log("DEBUG_LOGS_RECEIVED:", text); // Vérifie ça dans la console F12
-            try {
-                const data = JSON.parse(text);
-                setLogsContent(data.logs || 'NO_LOGS_YET');
-            } catch {
-                // S'il n'y a pas de JSON (texte brut envoyé par le backend)
-                setLogsContent(text || 'NO_LOGS_YET');
-            }
-        } catch (err) {
-            console.error("Erreur lors de la récupération des logs:", err);
-        }
-    };
-
     // Auto-refresh logs when viewing
     useEffect(() => {
         if (!showLogs) return;
 
-        // 1. Charger l'historique initial
-        fetchLogs();
-
-        // 2. Ouvrir le flux SSE pour le temps réel
-        const eventSource = new EventSource(`${API_BASE}/shards/${shard.slug}/logs/stream`);
-        
-        eventSource.onmessage = (event) => {
-            const newLine = event.data; // C'est la ligne de log reçue
-            console.log("NOUVELLE_LIGNE_STREAM:", newLine);
-            
-            // Mettre à jour le state des logs avec cette nouvelle ligne
-            setLogsContent(prev => [...prev.split('\n'), newLine].slice(-200).join('\n'));
+        // 1. Fonction pour charger l'historique initial
+        const fetchHistory = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/shards/${shard.slug}/logs?t=${Date.now()}`, { credentials: 'include' });
+                const text = await res.text();
+                if (text && text !== "NO_LOGS_AVAILABLE") {
+                    setLogsContent(text);
+                }
+            } catch (e) {
+                console.error("Erreur chargement historique:", e);
+            }
         };
 
-        eventSource.onerror = () => eventSource.close();
+        fetchHistory();
+
+        // 2. Initialisation du Stream SSE
+        const eventSource = new EventSource(`${API_BASE}/shards/${shard.slug}/logs/stream`);
+
+        eventSource.onmessage = (event) => {
+            const newLine = event.data;
+            console.log("DEBUG: Nouvelle ligne reçue via SSE:", newLine);
+            setLogsContent(prev => {
+                const newLogs = prev === "NO_LOGS_AVAILABLE" || !prev ? newLine : prev + "\n" + newLine;
+                return newLogs.split('\n').slice(-200).join('\n');
+            });
+        };
+
+        eventSource.onerror = (err) => {
+            console.error("Erreur Stream SSE:", err);
+            eventSource.close();
+        };
+
         return () => eventSource.close();
     }, [shard.slug, showLogs]);
 
@@ -181,15 +181,9 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
                                 </button>
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed text-gray-300 bg-black/60 custom-scrollbar log-container">
-                                {logsContent === "NO_LOGS_AVAILABLE" || logsContent === "NO_LOGS_YET" || logsContent === "COLLECTING_LOGS_PLEASE_WAIT" || logsContent.includes("LOG_FILE_NOT_FOUND") ? (
-                                    <div className="text-gray-500 italic p-4">
-                                        Aucun log disponible pour le moment... en attente de données du container.
-                                    </div>
-                                ) : (
-                                    <pre className="whitespace-pre-wrap font-mono">
-                                        {logsContent}
-                                    </pre>
-                                )}
+                                <pre className="text-xs font-mono p-4 overflow-x-auto whitespace-pre-wrap">
+                                    {logsContent === "NO_LOGS_AVAILABLE" || !logsContent ? "Aucun log disponible pour le moment..." : logsContent}
+                                </pre>
                                 <div ref={logsEndRef} />
                             </div>
                         </motion.div>
