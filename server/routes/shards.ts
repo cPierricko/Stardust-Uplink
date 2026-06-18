@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import AdmZip from 'adm-zip';
 import crypto from 'crypto';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import db from '../db.js';
 
 import { SHARDS_DIR as PATHS_SHARDS_DIR } from '../config/paths.js';
@@ -338,20 +338,41 @@ router.delete('/:id', async (req: Request, res: Response) => {
         }
 
         // Stop and remove Docker container and image
-        try {
-            const docker = new Docker({ socketPath: '/var/run/docker.sock' });
-            const containerName = `stardust-shard-${app.slug}`;
-            const container = docker.getContainer(containerName);
-            
-            try { await container.stop(); } catch(e) {}
-            try { await container.remove({ force: true }); } catch(e) {}
-            
-            const image = docker.getImage(`shard-${app.slug}`);
-            try { await image.remove({ force: true }); } catch(e) {}
-            
-            console.log(`[SHARDS] DOCKER_CLEANUP_SUCCESS: ${app.slug}`);
-        } catch (dockerErr) {
-            console.warn(`[SHARDS] DOCKER_CLEANUP_FAILED: ${app.slug}`, dockerErr);
+        const shardPath = path.join(SHARDS_DIR, app.slug);
+        const hasCompose = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+            .some(f => fs.existsSync(path.join(shardPath, f)));
+
+        if (hasCompose) {
+            console.log(`[SHARD] Arrêt du projet Compose pour ${app.slug}...`);
+            await new Promise<void>((resolve) => {
+                const composeFile = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].find(f => fs.existsSync(path.join(shardPath, f)));
+                const proc = spawn('docker', [
+                    'compose', 
+                    '-p', `stardust-${app.slug}`, 
+                    '-f', composeFile || 'docker-compose.yml',
+                    'down'
+                ], { cwd: shardPath });
+                
+                proc.on('close', () => resolve());
+                proc.on('error', () => resolve());
+            });
+            console.log(`[SHARDS] COMPOSE_DOWN_SUCCESS: ${app.slug}`);
+        } else {
+            try {
+                const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+                const containerName = `stardust-shard-${app.slug}`;
+                const container = docker.getContainer(containerName);
+                
+                try { await container.stop(); } catch(e) {}
+                try { await container.remove({ force: true }); } catch(e) {}
+                
+                const image = docker.getImage(`shard-${app.slug}`);
+                try { await image.remove({ force: true }); } catch(e) {}
+                
+                console.log(`[SHARDS] DOCKER_CLEANUP_SUCCESS: ${app.slug}`);
+            } catch (dockerErr: any) {
+                if (dockerErr.statusCode !== 404) console.warn(`[SHARDS] DOCKER_CLEANUP_FAILED: ${app.slug}`, dockerErr);
+            }
         }
 
         // Remove files
@@ -767,11 +788,31 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
         const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
 
-        const containerName = `stardust-shard-${shard.slug}`;
-        try {
-             const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
-             await container.stop();
-        } catch(e) {}
+        const shardPath = path.join(SHARDS_DIR, shard.slug);
+        const hasCompose = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+            .some(f => fs.existsSync(path.join(shardPath, f)));
+
+        if (hasCompose) {
+            console.log(`[SHARD] Arrêt du projet Compose pour ${shard.slug}...`);
+            await new Promise<void>((resolve) => {
+                const composeFile = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].find(f => fs.existsSync(path.join(shardPath, f)));
+                const proc = spawn('docker', [
+                    'compose', 
+                    '-p', `stardust-${shard.slug}`, 
+                    '-f', composeFile || 'docker-compose.yml',
+                    'stop'
+                ], { cwd: shardPath });
+                
+                proc.on('close', () => resolve());
+                proc.on('error', () => resolve());
+            });
+        } else {
+            const containerName = `stardust-shard-${shard.slug}`;
+            try {
+                 const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
+                 await container.stop();
+            } catch(e) {}
+        }
         
         db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('FAILED', id);
         res.json({ success: true, message: 'STOPPED' });
