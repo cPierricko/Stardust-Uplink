@@ -192,16 +192,20 @@ class ShardLogCollectorService {
      */
     getLogs(slug: string, n = 200): string {
         const buf = this._getBuffer(slug);
-        
-        // If buffer is empty, try to read from file
+        const logFile = this._getLogFilePath(slug);
+
+        // Si le buffer mémoire est vide, on vérifie impérativement le fichier sur le disque
         if (buf.length === 0) {
-            const logFile = this._getLogFilePath(slug);
             if (fs.existsSync(logFile)) {
-                const content = fs.readFileSync(logFile, 'utf8');
-                const lines = content.split('\n').filter(Boolean);
-                return lines.slice(-n).join('\n');
+                try {
+                    const content = fs.readFileSync(logFile, 'utf8');
+                    const lines = content.split('\n').filter(Boolean);
+                    return lines.slice(-n).join('\n');
+                } catch (e) {
+                    return 'ERROR_READING_LOG_FILE';
+                }
             }
-            return 'NO_LOGS_AVAILABLE';
+            return 'COLLECTING_LOGS_PLEASE_WAIT';
         }
 
         return buf.slice(-n).map(e => `${e.ts} [${e.level.toUpperCase()}] ${e.msg}`).join('\n');
