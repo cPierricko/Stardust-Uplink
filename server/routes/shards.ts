@@ -857,6 +857,11 @@ router.delete('/:id/logs', (req: Request, res: Response) => {
  * Returns buffered or build logs for a shard.
  */
 router.get('/:id/logs', async (req: Request, res: Response) => {
+    // Désactivation forcée du cache pour éviter le 304 Not Modified
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     const { id } = req.params;
     const tail = parseInt((req.query['tail'] as string) || '200', 10);
     try {

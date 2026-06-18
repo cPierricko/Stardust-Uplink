@@ -2,8 +2,7 @@
 # Fichier d'exclusion du contexte IA (Optimisation pour Stardust Uplink Backend)
 # -----------------------------------------------------------------------------
 
-# 1. Ignorer tout le Frontend (les correctifs actuels sont 100% côté serveur)
-client/
+
 
 # 2. Dépendances et fichiers compilés (Bruit inutile)
 node_modules/
