@@ -814,7 +814,7 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
             } catch(e) {}
         }
         
-        db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('FAILED', id);
+        db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('STOPPED', id);
         res.json({ success: true, message: 'STOPPED' });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -837,7 +837,15 @@ router.delete('/:id/database', async (req: Request, res: Response) => {
 
         if (composeFile) {
             const { spawnSync } = await import('child_process');
-            spawnSync('docker', ['compose', '-p', `stardust-${app.slug}`, '-f', composeFile, 'down', '-v'], { cwd: shardPath });
+            const result = spawnSync('docker', ['compose', '-p', `stardust-${app.slug}`, '-f', composeFile, 'down', '-v'], { cwd: shardPath });
+            if (result.error) {
+                console.error('[SHARDS] docker compose down -v failed:', result.error);
+                return res.status(500).json({ success: false, error: 'Failed to execute docker compose down', details: result.error.message });
+            }
+            if (result.status !== 0) {
+                console.error('[SHARDS] docker compose down -v exited with code:', result.status, result.stderr?.toString());
+                return res.status(500).json({ success: false, error: 'Docker compose down failed', details: result.stderr?.toString() });
+            }
             db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('STOPPED', id);
         } else {
             const persistentPath = path.join(process.cwd(), 'persistent_data', app.slug);
@@ -1019,6 +1027,48 @@ router.post('/:id/command', async (req: Request, res: Response) => {
         } catch (e: any) {
              res.status(500).json({ error: e.message });
         }
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/shards/:id/host-command
+ */
+router.post('/:id/host-command', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { command } = req.body;
+    if (!command) return res.status(400).json({ error: 'Command required' });
+    
+    try {
+        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const shardPath = path.join(PATHS_SHARDS_DIR, shard.slug);
+        
+        const { spawnSync } = await import('child_process');
+        
+        // Parse command respecting quotes
+        const argsMatch = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+        if (!argsMatch) return res.status(400).json({ error: 'Invalid command' });
+        
+        const args = argsMatch.map((arg: string) => {
+            if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
+                return arg.slice(1, -1);
+            }
+            return arg;
+        });
+        
+        const bin = args.shift() as string;
+
+        const result = spawnSync(bin, args, { cwd: shardPath, encoding: 'utf8' });
+        
+        let output = '';
+        if (result.stdout) output += result.stdout;
+        if (result.stderr) output += '\n' + result.stderr;
+        if (result.error) output += '\nError: ' + result.error.message;
+
+        res.json({ success: true, output: output.trim() || 'COMMAND_EXECUTED_NO_OUTPUT' });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }

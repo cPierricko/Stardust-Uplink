@@ -32,6 +32,8 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
     const [logs, setLogs] = useState<string>('');
     const [commandInput, setCommandInput] = useState<string>('');
     const [isExecuting, setIsExecuting] = useState(false);
+    const [hostCommandInput, setHostCommandInput] = useState<string>('');
+    const [isExecutingHost, setIsExecutingHost] = useState(false);
     const [showLogs, setShowLogs] = useState(false);
     const [isLiveMode, setIsLiveMode] = useState(true);
     const [logFilter, setLogFilter] = useState<'all' | 'stdout' | 'stderr'>('all');
@@ -323,6 +325,27 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
                 }
             } else showNotification(data.error || 'COMMAND_FAILED', 'error');
         } catch { showNotification('SYSTEM_ERROR', 'error'); } finally { setIsExecuting(false); }
+    };
+
+    const handleHostCommand = async () => {
+        if (!hostCommandInput) return;
+        setIsExecutingHost(true);
+        try {
+            const res = await fetch(`${API_BASE}/shards/${shard.id}/host-command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: hostCommandInput }),
+                credentials: 'include'
+            });
+            const data = await res.json();
+            if (data.success) {
+                showNotification('HOST_COMMAND_EXECUTED');
+                setHostCommandInput('');
+                if (data.output) {
+                    setLogs(prev => prev + '\n\n>>> HOST_OUTPUT:\n' + data.output);
+                }
+            } else showNotification(data.error || 'COMMAND_FAILED', 'error');
+        } catch { showNotification('SYSTEM_ERROR', 'error'); } finally { setIsExecutingHost(false); }
     };
 
     const handleClearLogs = async () => {
@@ -679,6 +702,26 @@ ANOTHER_KEY=VALUE"
                                             className="px-3 py-1.5 border border-cyan-500/40 text-cyan-500 font-mono text-[8px] tracking-widest hover:bg-cyan-500/10 transition-all uppercase disabled:opacity-20"
                                         >
                                             {isExecuting ? '...' : 'EXEC'}
+                                        </button>
+                                    </div>
+                                    
+                                    {/* Host Command input */}
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={hostCommandInput}
+                                            onChange={(e) => setHostCommandInput(e.target.value)}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') handleHostCommand(); }}
+                                            placeholder="EXEC_HOST_COMMAND (ex: docker compose ps)"
+                                            className="flex-1 bg-black/60 border border-emerald-900/40 text-emerald-400 font-mono text-[9px] px-2 py-1.5 focus:outline-none focus:border-emerald-500/50"
+                                            disabled={isExecutingHost}
+                                        />
+                                        <button
+                                            onClick={handleHostCommand}
+                                            disabled={isExecutingHost || !hostCommandInput}
+                                            className="px-3 py-1.5 border border-emerald-500/40 text-emerald-500 font-mono text-[8px] tracking-widest hover:bg-emerald-500/10 transition-all uppercase disabled:opacity-20"
+                                        >
+                                            {isExecutingHost ? '...' : 'HOST EXEC'}
                                         </button>
                                     </div>
                                 </div>
