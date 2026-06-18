@@ -832,10 +832,19 @@ router.delete('/:id/database', async (req: Request, res: Response) => {
             return res.status(404).json({ success: false, error: 'Shard not found' });
         }
         
-        const persistentPath = path.join(process.cwd(), 'persistent_data', app.slug);
-        if (fs.existsSync(persistentPath)) {
-            fs.rmSync(persistentPath, { recursive: true, force: true });
-            fs.mkdirSync(persistentPath, { recursive: true });
+        const shardPath = path.join(PATHS_SHARDS_DIR, app.slug);
+        const composeFile = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].find(f => fs.existsSync(path.join(shardPath, f)));
+
+        if (composeFile) {
+            const { spawnSync } = await import('child_process');
+            spawnSync('docker', ['compose', '-p', `stardust-${app.slug}`, '-f', composeFile, 'down', '-v'], { cwd: shardPath });
+            db.prepare('UPDATE apps SET status = ? WHERE id = ?').run('STOPPED', id);
+        } else {
+            const persistentPath = path.join(process.cwd(), 'persistent_data', app.slug);
+            if (fs.existsSync(persistentPath)) {
+                fs.rmSync(persistentPath, { recursive: true, force: true });
+                fs.mkdirSync(persistentPath, { recursive: true });
+            }
         }
         
         res.json({ success: true, message: 'Persistent storage wiped' });
@@ -972,9 +981,11 @@ router.post('/:id/command', async (req: Request, res: Response) => {
             let serviceName = shard.compose_main_service;
             if (!serviceName) {
                 try {
-                    const { execSync } = await import('child_process');
-                    const output = execSync(`docker compose -p stardust-${shard.slug} -f ${composeFile} ps --services`, { cwd: shardPath }).toString();
-                    serviceName = output.trim().split('\n')[0];
+                    const { spawnSync } = await import('child_process');
+                    const output = spawnSync('docker', ['compose', '-p', `stardust-${shard.slug}`, '-f', composeFile, 'ps', '--services'], { cwd: shardPath });
+                    if (output.stdout) {
+                        serviceName = output.stdout.toString().trim().split('\n')[0];
+                    }
                 } catch (e) {
                     return res.status(500).json({ error: 'Failed to determine compose service for exec' });
                 }
