@@ -315,7 +315,12 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
             if (data.success) {
                 showNotification('COMMAND_EXECUTED');
                 setCommandInput('');
-                fetchLogs();
+                // On ajoute l'output directement dans la fenêtre de logs pour que l'utilisateur le voie
+                if (data.output) {
+                    setLogs(prev => prev + '\n\n>>> COMMAND_OUTPUT:\n' + data.output);
+                } else {
+                    fetchLogs();
+                }
             } else showNotification(data.error || 'COMMAND_FAILED', 'error');
         } catch { showNotification('SYSTEM_ERROR', 'error'); } finally { setIsExecuting(false); }
     };
@@ -396,7 +401,7 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
     }, [showLogs, isLiveMode, shard.id]);
 
     const handleWipeDatabase = async () => {
-        if (!window.confirm("WARNING: This will instantly DELETE the sqlite.db instance. Are you sure?")) return;
+        if (!window.confirm("WARNING: This will instantly DELETE all persistent storage (database, files, docker volumes). Are you sure?")) return;
         try {
             const res = await fetch(`${API_BASE}/shards/${shard.id}/database`, { method: 'DELETE', credentials: 'include' });
             const data = await res.json();
@@ -1217,7 +1222,7 @@ ANOTHER_KEY=VALUE"
                         onClick={handleWipeDatabase}
                         className="w-full mt-2 py-1.5 border border-amber-500/30 text-amber-500 font-mono text-[8px] tracking-widest hover:bg-amber-500/10 transition-all uppercase"
                     >
-                        <Trash2 size={10} className="inline mr-2" /> WIPE SQLITE.DB
+                        <Trash2 size={10} className="inline mr-2" /> WIPE PERSISTENT STORAGE
                     </button>
                 </div>
             </div>
