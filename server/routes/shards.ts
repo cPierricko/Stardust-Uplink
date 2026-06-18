@@ -1102,7 +1102,7 @@ router.post('/:id/host-command', async (req: Request, res: Response) => {
         
         // Prevent rm outside of project
         if (bin === 'rm') {
-            const hasOutsidePath = args.some(a => a.startsWith('/') || a.includes('..'));
+            const hasOutsidePath = args.some((a: string) => a.startsWith('/') || a.includes('..'));
             if (hasOutsidePath) {
                 return res.status(403).json({ error: 'COMMAND_REJECTED: rm est strictement restreint au dossier du projet (chemins absolus interdits).' });
             }
