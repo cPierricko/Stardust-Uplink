@@ -36,13 +36,25 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
 
     // Auto-refresh logs when viewing
     useEffect(() => {
-        let interval: any;
-        if (showLogs) {
-            fetchLogs();
-            interval = setInterval(fetchLogs, 2000);
-        }
-        return () => clearInterval(interval);
-    }, [showLogs]);
+        if (!showLogs) return;
+
+        // 1. Charger l'historique initial
+        fetchLogs();
+
+        // 2. Ouvrir le flux SSE pour le temps réel
+        const eventSource = new EventSource(`${API_BASE}/shards/${shard.slug}/logs/stream`);
+        
+        eventSource.onmessage = (event) => {
+            const newLine = event.data; // C'est la ligne de log reçue
+            console.log("NOUVELLE_LIGNE_STREAM:", newLine);
+            
+            // Mettre à jour le state des logs avec cette nouvelle ligne
+            setLogsContent(prev => [...prev.split('\n'), newLine].slice(-200).join('\n'));
+        };
+
+        eventSource.onerror = () => eventSource.close();
+        return () => eventSource.close();
+    }, [shard.slug, showLogs]);
 
     useEffect(() => {
         if (logsEndRef.current) {
