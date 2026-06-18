@@ -45,7 +45,15 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
         const eventSource = new EventSource(`${API_BASE}/shards/${shard.slug}/logs/stream`);
 
         eventSource.onmessage = (event) => {
-            const newLine = event.data;
+            let newLine = event.data;
+            try {
+                // Le backend peut envoyer les logs streamés en JSON { ts, level, msg }
+                const parsed = JSON.parse(newLine);
+                newLine = parsed.msg !== undefined ? parsed.msg : newLine;
+            } catch (e) {
+                // Fallback: leave as raw text
+            }
+            
             console.log("DEBUG: Nouvelle ligne reçue via SSE:", newLine);
             setLogsContent(prev => {
                 const newLogs = prev === "NO_LOGS_AVAILABLE" || !prev ? newLine : prev + "\n" + newLine;

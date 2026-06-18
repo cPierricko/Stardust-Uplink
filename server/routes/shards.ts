@@ -885,12 +885,21 @@ router.get('/:id/logs', async (req: Request, res: Response) => {
         // Fallback: try to read from log file, then docker directly
         const logFilePath = path.join(process.cwd(), 'logs', `shard-${shard.slug}.log`);
         if (fs.existsSync(logFilePath)) {
+            // Also restart the collector so live stream works again if backend restarted
+            if (!ShardLogCollector.isCollecting(shard.slug)) {
+                ShardLogCollector.start(shard.slug);
+            }
             const lines = fs.readFileSync(logFilePath, 'utf8').split('\n').filter(Boolean);
             return res.json({ success: true, logs: lines.slice(-tail).join('\n'), source: 'file' });
         }
 
-        // Last resort: docker logs
+        // Last resort: restart collector and try docker logs
         try {
+            if (!ShardLogCollector.isCollecting(shard.slug)) {
+                ShardLogCollector.start(shard.slug);
+                return res.json({ success: true, logs: 'LOG_COLLECTOR_RESTARTED_PLEASE_WAIT', source: 'reboot' });
+            }
+            
             const containerName = `stardust-shard-${shard.slug}`;
             const container = new Docker({ socketPath: '/var/run/docker.sock' }).getContainer(containerName);
             const logs = await container.logs({ stdout: true, stderr: true, tail });
