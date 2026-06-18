@@ -148,21 +148,16 @@ class ShardLogCollectorService {
 
         const projectName = `stardust-${slug}`;
         const shardPath = path.join(SHARDS_DIR, slug);
-        
-        // On cherche le fichier compose valide
         const composeFile = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
             .find(f => fs.existsSync(path.join(shardPath, f)));
 
-        if (!composeFile) {
-            console.error(`[LOG_COLLECTOR] Impossible de trouver le fichier compose pour ${slug}`);
-            return;
-        }
+        if (!composeFile) return;
 
-        console.log(`[LOG_COLLECTOR] Starting compose log collection for project ${projectName}`);
+        console.log(`[LOG_COLLECTOR] Mode DEBUG activé pour ${slug}. Lancement de docker compose logs...`);
 
-        // On ajoute -f pour être absolument certain que Docker Compose vise le bon projet
+        // On utilise --follow et --timestamps, sans --no-color pour voir si des flux sortent
         const proc = spawn('docker', [
-            'compose', '-p', projectName, '-f', composeFile, 'logs', '--follow', '--timestamps', '--no-color'
+            'compose', '-p', projectName, '-f', composeFile, 'logs', '--follow', '--timestamps'
         ], {
             cwd: shardPath,
             stdio: ['ignore', 'pipe', 'pipe']
@@ -170,15 +165,20 @@ class ShardLogCollectorService {
 
         this.collectors.set(slug, proc);
 
-        proc.stdout?.on('data', (data: Buffer) => this._pushLine(slug, 'stdout', data.toString('utf8')));
-        proc.stderr?.on('data', (data: Buffer) => this._pushLine(slug, 'stderr', data.toString('utf8')));
-        
-        proc.on('error', (err) => {
-            console.error(`[LOG_COLLECTOR] Compose log error for ${slug}:`, err.message);
+        proc.stdout?.on('data', (data) => {
+            const str = data.toString();
+            // DEBUG : Si on reçoit ça, le problème est résolu
+            console.log(`[LOG_COLLECTOR] DATA REÇUE pour ${slug}: ${str.substring(0, 50)}...`);
+            this._pushLine(slug, 'stdout', str);
+        });
+
+        proc.stderr?.on('data', (data) => {
+            console.log(`[LOG_COLLECTOR] STDERR REÇU pour ${slug}: ${data.toString().substring(0, 50)}...`);
+            this._pushLine(slug, 'stderr', data.toString());
         });
 
         proc.on('close', (code) => {
-            console.log(`[LOG_COLLECTOR] Log collection ended for ${slug} (code ${code})`);
+            console.log(`[LOG_COLLECTOR] Processus de log terminé pour ${slug} avec code ${code}`);
             this.collectors.delete(slug);
         });
     }
