@@ -962,8 +962,36 @@ router.post('/:id/command', async (req: Request, res: Response) => {
     if (!command) return res.status(400).json({ error: 'Command required' });
     
     try {
-        const shard = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        const shard = db.prepare('SELECT slug, compose_main_service FROM apps WHERE id = ?').get(id) as any;
         if (!shard) return res.status(404).json({ error: 'Shard not found' });
+
+        const shardPath = path.join(PATHS_SHARDS_DIR, shard.slug);
+        const composeFile = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].find(f => fs.existsSync(path.join(shardPath, f)));
+
+        if (composeFile) {
+            let serviceName = shard.compose_main_service;
+            if (!serviceName) {
+                try {
+                    const { execSync } = await import('child_process');
+                    const output = execSync(`docker compose -p stardust-${shard.slug} -f ${composeFile} ps --services`, { cwd: shardPath }).toString();
+                    serviceName = output.trim().split('\n')[0];
+                } catch (e) {
+                    return res.status(500).json({ error: 'Failed to determine compose service for exec' });
+                }
+            }
+
+            if (!serviceName) return res.status(400).json({ error: 'No service running to exec into' });
+
+            const proc = spawn('docker', [
+                'compose', '-p', `stardust-${shard.slug}`, '-f', composeFile, 'exec', '-T', serviceName, 'sh', '-c', command
+            ], { cwd: shardPath });
+            
+            let output = '';
+            proc.stdout.on('data', d => output += d.toString('utf8'));
+            proc.stderr.on('data', d => output += d.toString('utf8'));
+            proc.on('close', () => res.json({ success: true, output }));
+            return;
+        }
 
         const containerName = `stardust-shard-${shard.slug}`;
         try {
