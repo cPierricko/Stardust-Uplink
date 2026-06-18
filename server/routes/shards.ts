@@ -122,7 +122,7 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
 
     // Initial detection and merge
     const existing = db.prepare('SELECT id, env_vars, api_token, assigned_port FROM apps WHERE slug = ?').get(appSlug) as any;
-    const finalEnvVars = env_vars || (existing ? existing.env_vars : '{}');
+    let finalEnvVars = env_vars || (existing ? existing.env_vars : '{}');
     let has_backend = existing ? existing.has_backend : 0;
 
     try {
@@ -170,8 +170,14 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
             }
 
             // RE-APPLY ENVIRONMENT VARIABLES: Ensure .env is restored after wipe/extract/clone
-            fs.writeFileSync(path.join(extractPath, '.env'), formatToEnv(finalEnvVars));
-            console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${path.join(extractPath, '.env')}`);
+            const envPath = path.join(extractPath, '.env');
+            if (fs.existsSync(envPath)) {
+                finalEnvVars = fs.readFileSync(envPath, 'utf8');
+                console.log(`[SHARDS] EXTRACTED_NEW_.ENV: ${appSlug} at ${envPath}`);
+            } else {
+                fs.writeFileSync(envPath, formatToEnv(finalEnvVars));
+                console.log(`[SHARDS] RESTORED_.ENV: ${appSlug} at ${envPath}`);
+            }
 
         } else {
             // Initialize EMPTY/SHELL shard
@@ -523,8 +529,13 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
 
         // RE-APPLY ENVIRONMENT VARIABLES: Restore from database after wipe/extract
         const envPath = path.join(extractPath, '.env');
-        fs.writeFileSync(envPath, formatToEnv(shard.env_vars));
-        console.log(`[CI/CD] RESTORED_.ENV: ${shard.slug} at ${envPath}`);
+        if (fs.existsSync(envPath)) {
+            shard.env_vars = fs.readFileSync(envPath, 'utf8');
+            console.log(`[CI/CD] EXTRACTED_NEW_.ENV: ${shard.slug} - Using as source of truth`);
+        } else {
+            fs.writeFileSync(envPath, formatToEnv(shard.env_vars));
+            console.log(`[CI/CD] RESTORED_.ENV: ${shard.slug} at ${envPath}`);
+        }
 
         // Detect compose mode
         const composeFile = detectComposeFile(extractPath);
@@ -532,7 +543,7 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
 
         // Re-detect backend in case it changed
         const has_backend = detectBackend(extractPath) ? 1 : 0;
-        db.prepare('UPDATE apps SET has_backend = ?, status = ?, compose_mode = ? WHERE slug = ?').run(has_backend, 'BUILDING', isCompose ? 1 : 0, shard.slug);
+        db.prepare('UPDATE apps SET has_backend = ?, status = ?, compose_mode = ?, env_vars = ? WHERE slug = ?').run(has_backend, 'BUILDING', isCompose ? 1 : 0, shard.env_vars, shard.slug);
 
         // ASYNC DOCKER BUILD & RUN (CI/CD push)
         (async () => {
