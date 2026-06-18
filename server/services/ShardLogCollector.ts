@@ -147,31 +147,38 @@ class ShardLogCollectorService {
         this.stop(slug);
 
         const projectName = `stardust-${slug}`;
+        const shardPath = path.join(SHARDS_DIR, slug);
+        
+        // On cherche le fichier compose valide
+        const composeFile = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+            .find(f => fs.existsSync(path.join(shardPath, f)));
+
+        if (!composeFile) {
+            console.error(`[LOG_COLLECTOR] Impossible de trouver le fichier compose pour ${slug}`);
+            return;
+        }
+
         console.log(`[LOG_COLLECTOR] Starting compose log collection for project ${projectName}`);
 
+        // On ajoute -f pour être absolument certain que Docker Compose vise le bon projet
         const proc = spawn('docker', [
-            'compose', '-p', projectName, 'logs', '--follow', '--timestamps', '--no-color'
+            'compose', '-p', projectName, '-f', composeFile, 'logs', '--follow', '--timestamps', '--no-color'
         ], {
-            cwd: path.join(SHARDS_DIR, slug),
+            cwd: shardPath,
             stdio: ['ignore', 'pipe', 'pipe']
         });
 
         this.collectors.set(slug, proc);
 
-        proc.stdout?.on('data', (data: Buffer) => {
-            this._pushLine(slug, 'stdout', data.toString('utf8'));
-        });
-
-        proc.stderr?.on('data', (data: Buffer) => {
-            this._pushLine(slug, 'stderr', data.toString('utf8'));
-        });
-
+        proc.stdout?.on('data', (data: Buffer) => this._pushLine(slug, 'stdout', data.toString('utf8')));
+        proc.stderr?.on('data', (data: Buffer) => this._pushLine(slug, 'stderr', data.toString('utf8')));
+        
         proc.on('error', (err) => {
             console.error(`[LOG_COLLECTOR] Compose log error for ${slug}:`, err.message);
         });
 
         proc.on('close', (code) => {
-            console.log(`[LOG_COLLECTOR] Compose log collection ended for ${slug} (code ${code})`);
+            console.log(`[LOG_COLLECTOR] Log collection ended for ${slug} (code ${code})`);
             this.collectors.delete(slug);
         });
     }
