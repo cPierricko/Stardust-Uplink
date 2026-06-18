@@ -71,7 +71,10 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
 
     useEffect(() => {
         if (logsEndRef.current) {
-            logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+            const parent = logsEndRef.current.parentElement;
+            if (parent) {
+                parent.scrollTop = parent.scrollHeight;
+            }
         }
     }, [logsContent]);
 
@@ -249,17 +252,13 @@ export default function AppShard({ shard, onAccess, onUpdate, onDelete, user }: 
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-8"
-                        onClick={(e) => {
-                            if (e.target === e.currentTarget) setShowSettings(false);
-                        }}
+                        className="fixed inset-0 z-[100] bg-[#0a0f18] flex flex-col items-center justify-start overflow-y-auto custom-scrollbar"
                     >
                         <motion.div
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden relative shadow-2xl shadow-cyan-900/20"
-                            onClick={(e) => e.stopPropagation()}
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            exit={{ y: 20, opacity: 0 }}
+                            className="w-full max-w-6xl min-h-screen flex flex-col relative"
                         >
                             <ShardSettings 
                                 shard={shard} 

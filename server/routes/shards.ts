@@ -846,8 +846,23 @@ router.delete('/:id/database', async (req: Request, res: Response) => {
                 console.error('[SHARDS] docker compose down -v exited with code:', result.status, result.stderr?.toString());
                 return res.status(500).json({ success: false, error: 'Docker compose down failed', details: result.stderr?.toString() });
             }
+            
             // WIPE Bind Mounts (local folders often used in compose projects)
-            ['data', 'persistent_data'].forEach(folder => {
+            const wipeTargets = ['data', 'persistent_data'];
+            
+            // Add smart detection for PERSISTENT_STORAGE_PATH
+            try {
+                if (app.env_vars) {
+                    const parsedEnv = typeof app.env_vars === 'string' ? JSON.parse(app.env_vars) : app.env_vars;
+                    if (parsedEnv.PERSISTENT_STORAGE_PATH && parsedEnv.PERSISTENT_STORAGE_PATH.startsWith('./')) {
+                        wipeTargets.push(parsedEnv.PERSISTENT_STORAGE_PATH);
+                    }
+                }
+            } catch (e) {
+                console.error('[SHARDS] Failed to parse env_vars for wipe logic:', e);
+            }
+            
+            wipeTargets.forEach(folder => {
                 const fp = path.join(shardPath, folder);
                 if (fs.existsSync(fp)) {
                     try {
@@ -1070,6 +1085,28 @@ router.post('/:id/host-command', async (req: Request, res: Response) => {
         });
         
         const bin = args.shift() as string;
+
+        // --- SAFETY FILTER ---
+        const allowedBinaries = ['docker', 'ls', 'cat', 'tail', 'grep', 'pwd', 'echo', 'rm', 'mkdir', 'touch'];
+        if (!allowedBinaries.includes(bin)) {
+            return res.status(403).json({ error: 'COMMAND_REJECTED: Exécutable non autorisé.' });
+        }
+
+        // Prevent dangerous global docker commands
+        if (bin === 'docker' && args.length > 0) {
+            const subcmd = args[0];
+            if (['system', 'prune', 'network', 'volume'].includes(subcmd)) {
+                return res.status(403).json({ error: 'COMMAND_REJECTED: Les commandes Docker globales sont bloquées pour votre sécurité.' });
+            }
+        }
+        
+        // Prevent rm outside of project
+        if (bin === 'rm') {
+            const hasOutsidePath = args.some(a => a.startsWith('/') || a.includes('..'));
+            if (hasOutsidePath) {
+                return res.status(403).json({ error: 'COMMAND_REJECTED: rm est strictement restreint au dossier du projet (chemins absolus interdits).' });
+            }
+        }
 
         const result = spawnSync(bin, args, { cwd: shardPath, encoding: 'utf8' });
         

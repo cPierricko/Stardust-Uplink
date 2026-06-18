@@ -386,7 +386,10 @@ export default function ShardSettings({ shard, user, onClose, onUpdate, onDelete
     // Auto-scroll logs to bottom
     useEffect(() => {
         if (logsEndRef.current) {
-            logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+            const parent = logsEndRef.current.parentElement;
+            if (parent) {
+                parent.scrollTop = parent.scrollHeight;
+            }
         }
     }, [logs]);
 
