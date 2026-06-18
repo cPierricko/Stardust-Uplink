@@ -153,11 +153,31 @@ export class ShardRunner {
      * Boot a compose-based shard by running docker compose up -d,
      * connecting services to the network, and resolving its IP.
      */
-    static async bootCompose(slug: string, mainService: string | null): Promise<{ ip: string; port: number }> {
+    static async bootCompose(slug: string, mainService: string | null, envVarsParam: any): Promise<{ ip: string; port: number }> {
         console.log(`[SHARD_RUNNER] Booting compose shard ${slug}, main service: ${mainService || 'auto-detect'}...`);
         
         const projectName = `stardust-${slug}`;
         const shardPath = path.join(SHARDS_DIR, slug);
+
+        let envString = '';
+        if (envVarsParam) {
+            try {
+                if (typeof envVarsParam === 'string' && envVarsParam.trim().startsWith('{')) {
+                    const parsedEnv = JSON.parse(envVarsParam);
+                    envString = Object.entries(parsedEnv).map(([k, v]) => `${k}=${v}`).join('\n');
+                } else if (typeof envVarsParam === 'string') {
+                    envString = envVarsParam;
+                } else if (typeof envVarsParam === 'object') {
+                    envString = Object.entries(envVarsParam).map(([k, v]) => `${k}=${v}`).join('\n');
+                }
+            } catch (err) {
+                console.warn(`[SHARD_RUNNER] Error parsing env vars for compose ${slug}.`);
+            }
+        }
+        
+        if (envString) {
+            fs.writeFileSync(path.join(shardPath, '.env'), envString);
+        }
 
         // 1. Execute docker compose up -d
         await new Promise<void>((resolve, reject) => {

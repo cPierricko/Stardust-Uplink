@@ -1,0 +1,41 @@
+# -----------------------------------------------------------------------------
+# Fichier d'exclusion du contexte IA (Optimisation pour Stardust Uplink Backend)
+# -----------------------------------------------------------------------------
+
+# 1. Ignorer tout le Frontend (les correctifs actuels sont 100% côté serveur)
+client/
+
+# 2. Dépendances et fichiers compilés (Bruit inutile)
+node_modules/
+dist/
+build/
+.cache/
+*.js.map
+
+# 3. Fichiers de bases de données, logs et volumes Docker
+# L'IA n'a pas besoin de lire ta base SQLite ou les logs de tes shards
+db.sqlite
+db.sqlite-journal
+persistent_data/
+shards/
+logs/
+server/templates_storage/
+
+# 4. Fichiers de tests (Bruit inutile pour le debug de l'architecture)
+server/tests/
+*.test.ts
+*.spec.ts
+server/vitest.config.ts
+server/test.js
+
+# 5. Configurations système, scripts et documentation longue
+.github/
+README.md
+*.sh
+server/scripts/
+deploy.sh
+
+# 6. Lockfiles (Prend une place énorme dans la mémoire de l'IA)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

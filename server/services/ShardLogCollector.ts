@@ -15,6 +15,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { SHARDS_DIR } from '../config/paths.js';
 
 const LOG_DIR = path.resolve(process.cwd(), 'logs');
 if (!fs.existsSync(LOG_DIR)) {
@@ -142,6 +143,7 @@ class ShardLogCollectorService {
         const proc = spawn('docker', [
             'compose', '-p', projectName, 'logs', '--follow', '--timestamps', '--no-color'
         ], {
+            cwd: path.join(SHARDS_DIR, slug),
             stdio: ['ignore', 'pipe', 'pipe']
         });
 

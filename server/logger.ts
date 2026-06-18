@@ -50,6 +50,8 @@ function push(level: LogEntry['level'], args: unknown[]) {
         .map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
         .join(' ');
     
+    if (msg.includes('/admin/logs') || msg.includes('/admin/system/docker') || msg.includes('heartbeat')) return;
+    
     const entry: LogEntry = {
         ts: new Date().toISOString(),
         level,
@@ -131,6 +133,7 @@ const _originalPush = push;
 // Re-patch push to notify listeners (done after listeners Set is defined)
 const patchedPush = (level: LogEntry['level'], args: unknown[]) => {
     const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    if (msg.includes('/admin/logs') || msg.includes('/admin/system/docker') || msg.includes('heartbeat')) return;
     const entry: LogEntry = { ts: new Date().toISOString(), level, tag: extractTag(msg), msg };
     buffer.push(entry);
     if (buffer.length > MAX_LINES) buffer.shift();

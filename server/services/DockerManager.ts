@@ -40,7 +40,10 @@ class DockerManagerService {
                 const db = (await import('../db.js')).default;
                 const shards = await this.listShards();
                 for (const containerInfo of shards) {
-                    const slug = containerInfo.Labels['com.stardust.shard'];
+                    let slug = containerInfo.Labels['com.stardust.shard'];
+                    if (!slug && containerInfo.Labels['com.docker.compose.project']?.startsWith('stardust-')) {
+                        slug = containerInfo.Labels['com.docker.compose.project'].replace(/^stardust-/, '');
+                    }
                     const netInfo = containerInfo.NetworkSettings?.Networks?.['stardust_internal'];
                     if (slug && netInfo && netInfo.IPAddress) {
                         db.prepare('UPDATE apps SET internal_ip = ?, status = ? WHERE slug = ?').run(netInfo.IPAddress, 'DEPLOYED', slug);
@@ -123,14 +126,12 @@ class DockerManagerService {
     }
 
     async listShards() {
-        const containers = await this.docker.listContainers({
-            all: true,
-            filters: {
-                label: ['com.stardust.shard']
-            }
-        });
+        const containers = await this.docker.listContainers({ all: true });
         
-        return containers;
+        return containers.filter(c => 
+            c.Labels['com.stardust.shard'] || 
+            (c.Labels['com.docker.compose.project'] && c.Labels['com.docker.compose.project'].startsWith('stardust-'))
+        );
     }
 }
 

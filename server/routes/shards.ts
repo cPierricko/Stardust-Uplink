@@ -274,7 +274,7 @@ router.post('/upload', upload.single('app'), async (req: Request, res: Response)
 
                     let bootResult: { ip: string; port: number };
                     if (useCompose) {
-                        bootResult = await ShardRunner.bootCompose(appSlug, shardRow?.compose_main_service || null);
+                        bootResult = await ShardRunner.bootCompose(appSlug, shardRow?.compose_main_service || null, finalEnvVars);
                     } else {
                         const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
                         let internalPort = isNode ? 3000 : 80;
@@ -523,7 +523,7 @@ router.post('/push', upload.single('app'), async (req: Request, res: Response) =
 
                 let bootResult: { ip: string; port: number };
                 if (useCompose) {
-                    bootResult = await ShardRunner.bootCompose(shard.slug, shardRow?.compose_main_service || null);
+                    bootResult = await ShardRunner.bootCompose(shard.slug, shardRow?.compose_main_service || null, shard.env_vars);
                 } else {
                     const isNode = fs.existsSync(path.join(extractPath, 'package.json'));
                     let internalPort = isNode ? 3000 : 80;
@@ -638,7 +638,7 @@ router.post('/:id/restart', async (req: Request, res: Response) => {
             try {
                 let bootResult: { ip: string; port: number };
                 if (shard.compose_mode === 1) {
-                    bootResult = await ShardRunner.bootCompose(shard.slug, shard.compose_main_service || null);
+                    bootResult = await ShardRunner.bootCompose(shard.slug, shard.compose_main_service || null, shard.env_vars);
                 } else {
                     bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
                 }
@@ -690,7 +690,7 @@ router.post('/:id/start', async (req: Request, res: Response) => {
             try {
                 let bootResult: { ip: string; port: number };
                 if (shard.compose_mode === 1) {
-                    bootResult = await ShardRunner.bootCompose(shard.slug, shard.compose_main_service || null);
+                    bootResult = await ShardRunner.bootCompose(shard.slug, shard.compose_main_service || null, shard.env_vars);
                 } else {
                     bootResult = await ShardRunner.boot(shard.slug, shard.env_vars, shard.assigned_port);
                 }
@@ -784,7 +784,24 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
  * DELETE /api/shards/:id/database
  */
 router.delete('/:id/database', async (req: Request, res: Response) => {
-    return res.status(501).json({ error: 'Function disabled in cloud architecture' });
+    const { id } = req.params;
+    try {
+        const app = db.prepare('SELECT slug FROM apps WHERE id = ?').get(id) as any;
+        if (!app) {
+            return res.status(404).json({ success: false, error: 'Shard not found' });
+        }
+        
+        const persistentPath = path.join(process.cwd(), 'persistent_data', app.slug);
+        if (fs.existsSync(persistentPath)) {
+            fs.rmSync(persistentPath, { recursive: true, force: true });
+            fs.mkdirSync(persistentPath, { recursive: true });
+        }
+        
+        res.json({ success: true, message: 'Persistent storage wiped' });
+    } catch (err: any) {
+        console.error('[SHARDS] Wipe database error:', err);
+        res.status(500).json({ success: false, error: 'Failed to wipe persistent storage', details: err.message });
+    }
 });
 
 /**
